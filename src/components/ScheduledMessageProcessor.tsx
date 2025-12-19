@@ -42,19 +42,7 @@ export default function ScheduledMessageProcessor() {
                 console.log(`[Scheduler] Sent ${sentCount} scheduled message(s)`);
             }
         } catch (error) {
-            // Handle Firestore permission errors silently
-            const errorMessage = error instanceof Error ? error.message : String(error);
-
-            if (errorMessage.includes('permission') ||
-                errorMessage.includes('PERMISSION_DENIED') ||
-                errorMessage.includes('Missing or insufficient permissions')) {
-                console.warn('[Scheduler] Firestore permission issue, skipping scheduled messages check');
-            } else if (errorMessage.includes('index')) {
-                console.warn('[Scheduler] Missing Firestore index, skipping scheduled messages check');
-            } else {
-                // Only log non-permission errors
-                console.warn('[Scheduler] Could not process scheduled messages:', errorMessage);
-            }
+            console.error('[Scheduler] Error processing scheduled messages:', error);
         } finally {
             processingRef.current = false;
         }

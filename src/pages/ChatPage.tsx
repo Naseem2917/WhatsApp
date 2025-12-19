@@ -11,7 +11,10 @@ import {
     setTypingStatus,
     subscribeToTypingStatus,
     makeGroupAdmin,
-    removeGroupMember
+    removeGroupMember,
+    deleteMessage,
+    toggleMessageStar,
+    toggleMessagePin
 } from '../services/chatService';
 import { uploadFile, validateFile } from '../services/fileService';
 import { getUserById } from '../services/userService';
@@ -24,6 +27,11 @@ import TripPlannerFormModal from '../components/chat/TripPlannerFormModal';
 import SmartRepliesPanel from '../components/chat/SmartRepliesPanel';
 import GroupInfoPanel from '../components/chat/GroupInfoPanel';
 import UserProfilePanel from '../components/chat/UserProfilePanel';
+import MessageActionMenu from '../components/chat/MessageActionMenu';
+import ForwardModal from '../components/chat/ForwardModal';
+import AIRewriteModal from '../components/chat/AIRewriteModal';
+import AISuggestionBar from '../components/chat/AISuggestionBar';
+import { analyzeMessageIntent, type AIChatActionResponse } from '../services/aiService';
 import type { Chat, Message, UserProfile } from '../types';
 
 export default function ChatPage() {
@@ -58,6 +66,19 @@ export default function ChatPage() {
     const [showChatMenu, setShowChatMenu] = useState(false);
     const [showUserProfile, setShowUserProfile] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [chatSearchQuery, setChatSearchQuery] = useState('');
+    const [showSearch, setShowSearch] = useState(false);
+    const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+    const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
+    const [showAIRewrite, setShowAIRewrite] = useState(false);
+    const [aiSuggestion, setAiSuggestion] = useState<AIChatActionResponse | null>(null);
+    const [showMoreEmojis, setShowMoreEmojis] = useState<{ messageId: string } | null>(null);
+
+    // Filter messages based on search query
+    const filteredMessages = messages.filter(msg => {
+        if (!chatSearchQuery.trim()) return true;
+        return msg.content.toLowerCase().includes(chatSearchQuery.toLowerCase());
+    });
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -99,16 +120,20 @@ export default function ChatPage() {
                     const memberProfilesMap = new Map<string, UserProfile>();
                     const participantData: Array<{ name: string; location: string }> = [];
 
-                    for (const uid of chatData.participants) {
-                        const user = await getUserById(uid);
+                    // Fetch all members in parallel
+                    const memberPromises = chatData.participants.map(uid => getUserById(uid));
+                    const members = await Promise.all(memberPromises);
+
+                    members.forEach(user => {
                         if (user) {
-                            memberProfilesMap.set(uid, user);
+                            memberProfilesMap.set(user.uid, user);
                             participantData.push({
                                 name: user.displayName || 'Unknown',
                                 location: user.defaultLocation || 'Location not set'
                             });
                         }
-                    }
+                    });
+
                     setGroupMemberProfiles(memberProfilesMap);
                     setGroupParticipants(participantData);
                 }
@@ -157,6 +182,30 @@ export default function ChatPage() {
             }
         };
     }, [chatId, userProfile?.uid, isTyping]);
+
+    // Analyze incoming messages for AI suggestions (only from others, not own)
+    useEffect(() => {
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage || lastMessage.senderId === userProfile?.uid) return;
+
+        // Only analyze messages received in the last 5 seconds
+        const messageAge = Date.now() - new Date(lastMessage.timestamp).getTime();
+        if (messageAge > 5000) return;
+
+        // Analyze with AI
+        const analyzeMessage = async () => {
+            try {
+                const result = await analyzeMessageIntent(lastMessage.content);
+                if (result.suggestedAction !== 'none') {
+                    setAiSuggestion(result);
+                }
+            } catch (error) {
+                console.error('AI analysis failed:', error);
+            }
+        };
+
+        analyzeMessage();
+    }, [messages, userProfile?.uid]);
 
     const handleTyping = useCallback(() => {
         if (!chatId || !userProfile?.uid) return;
@@ -210,7 +259,7 @@ export default function ChatPage() {
 
     // Group messages by date
     const groupedMessages: { date: string; messages: Message[] }[] = [];
-    messages.forEach((message) => {
+    filteredMessages.forEach((message) => {
         const dateStr = message.timestamp.toDateString();
         const lastGroup = groupedMessages[groupedMessages.length - 1];
         if (lastGroup && lastGroup.date === dateStr) {
@@ -242,148 +291,187 @@ export default function ChatPage() {
             {/* Chat Area - flex column with fixed header/footer */}
             <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
                 {/* Chat Header */}
-                <header className="wa-header h-[60px] flex items-center px-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--wa-border)' }}>
-                    <div className="flex items-center gap-3 flex-1">
-                        {/* Back button - mobile only */}
-                        <Link to="/" className="sm:hidden icon-btn">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                        </Link>
-
-                        {/* User/Group Avatar */}
-                        <div className="relative">
-                            <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center" style={{ backgroundColor: 'var(--wa-icon)' }}>
-                                {chat?.isGroup ? (
-                                    <svg className="w-5 h-5" fill="var(--wa-bg-panel)" viewBox="0 0 24 24">
-                                        <path d="M12 12.75c1.63 0 3.07.39 4.24.9 1.08.48 1.76 1.56 1.76 2.73V18H6v-1.61c0-1.18.68-2.26 1.76-2.73 1.17-.52 2.61-.91 4.24-.91z" />
-                                    </svg>
-                                ) : otherUser?.photoURL ? (
-                                    <img src={otherUser.photoURL} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                    <span className="text-lg font-medium" style={{ color: 'var(--wa-bg-panel)' }}>
-                                        {otherUser?.displayName?.charAt(0).toUpperCase() || '?'}
-                                    </span>
-                                )}
-                            </div>
-                            {!chat?.isGroup && otherUser?.isOnline && (
-                                <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full" style={{ backgroundColor: 'var(--wa-green)', border: '2px solid var(--wa-bg-header)' }} />
-                            )}
-                        </div>
-
-                        {/* User Info - Clickable for group info */}
-                        <div
-                            className={`flex-1 min-w-0 ${chat?.isGroup ? 'cursor-pointer' : ''}`}
-                            onClick={() => chat?.isGroup && setShowGroupInfo(true)}
-                        >
-                            <h1 className="font-medium truncate" style={{ color: 'var(--wa-text-primary)' }}>
-                                {chat?.isGroup ? chat.groupName : otherUser?.displayName || 'Unknown User'}
-                            </h1>
-                            <p className="text-sm truncate" style={{ color: 'var(--wa-text-secondary)' }}>
-                                {typingUsers.length > 0 ? (
-                                    <span style={{ color: 'var(--wa-green)' }}>typing...</span>
-                                ) : chat?.isGroup ? (
-                                    `${chat.participants.length} members`
-                                ) : otherUser?.isOnline ? (
-                                    <span style={{ color: 'var(--wa-green)' }}>Online</span>
-                                ) : (
-                                    `Last seen ${otherUser?.lastSeen ? formatTime(otherUser.lastSeen) : 'recently'}`
-                                )}
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Header actions */}
-                    <div className="flex items-center gap-1 relative">
-                        {/* AI Features Button */}
-                        <button
-                            className="icon-btn"
-                            onClick={() => setShowAIPanel(!showAIPanel)}
-                            title="AI Features"
-                            style={{ color: showAIPanel ? 'var(--wa-green)' : undefined }}
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                            </svg>
-                        </button>
-
-                        {/* AI Features Panel */}
-                        {showAIPanel && chatId && userProfile && (
-                            <AIFeaturesPanel
-                                chatId={chatId}
-                                messages={messages}
-                                isGroup={chat?.isGroup || false}
-                                currentUserId={userProfile.uid}
-                                participants={groupParticipants}
-                                onClose={() => setShowAIPanel(false)}
-                                onSummaryGenerated={(summary) => {
-                                    setConversationSummary(summary);
-                                    setShowSummaryModal(true);
-                                }}
-                                onImportantMessagesDetected={(ids) => {
-                                    setImportantMessageIds(ids);
-                                }}
-                                onTripPlanGenerated={(plan) => {
-                                    setTripPlan(plan);
-                                    setShowTripModal(true);
-                                }}
-                                onSmartRepliesGenerated={(replies) => {
-                                    setSmartReplies(replies);
-                                }}
-                                onScheduleMessage={() => {
-                                    setShowAIPanel(false);
-                                    setShowScheduleModal(true);
-                                }}
-                                onOpenTripForm={() => {
-                                    setShowAIPanel(false);
-                                    setShowTripForm(true);
-                                }}
-                            />
-                        )}
-
-                        <button className="icon-btn">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </button>
-                        <div className="relative">
-                            <button
-                                className="icon-btn"
-                                onClick={() => setShowChatMenu(!showChatMenu)}
-                            >
-                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
+                <header className="wa-header h-[60px] flex items-center px-4 flex-shrink-0 relative z-20" style={{ borderBottom: '1px solid var(--wa-border)' }}>
+                    {showSearch ? (
+                        <div className="flex-1 flex items-center gap-4 animate-fade-in w-full">
+                            <button onClick={() => { setShowSearch(false); setChatSearchQuery(''); }} className="icon-btn">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                                 </svg>
                             </button>
-                            <DropdownMenu
-                                isOpen={showChatMenu}
-                                onClose={() => setShowChatMenu(false)}
-                                items={[
-                                    {
-                                        label: chat?.isGroup ? 'Group Info' : 'View Contact',
-                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
-                                        onClick: () => chat?.isGroup ? setShowGroupInfo(true) : setShowUserProfile(true)
-                                    },
-                                    {
-                                        label: 'Search in Chat',
-                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
-                                        onClick: () => { /* TODO: Implement search */ }
-                                    },
-                                    {
-                                        label: 'Mute Notifications',
-                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>,
-                                        onClick: () => { /* TODO: Implement mute */ }
-                                    },
-                                    {
-                                        label: 'Clear Chat',
-                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
-                                        onClick: () => { /* TODO: Implement clear */ },
-                                        danger: true
-                                    }
-                                ]}
-                            />
+                            <div className="flex-1 relative">
+                                <input
+                                    type="text"
+                                    value={chatSearchQuery}
+                                    onChange={(e) => setChatSearchQuery(e.target.value)}
+                                    placeholder="Search in chat..."
+                                    autoFocus
+                                    className="w-full rounded-lg px-4 py-2 text-sm focus:outline-none"
+                                    style={{ backgroundColor: 'var(--wa-bg-input)', color: 'var(--wa-text-primary)' }}
+                                />
+                            </div>
+                            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--wa-text-light)' }}>
+                                {filteredMessages.length} matches
+                            </span>
                         </div>
-                    </div>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-3 flex-1 overflow-hidden">
+                                {/* Back button - mobile only */}
+                                <Link to="/" className="sm:hidden icon-btn flex-shrink-0">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                                    </svg>
+                                </Link>
+
+                                {/* User/Group Avatar */}
+                                <div className="relative flex-shrink-0">
+                                    <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center" style={{ backgroundColor: 'var(--wa-icon)' }}>
+                                        {chat?.isGroup ? (
+                                            chat.groupPhoto ? (
+                                                <img src={chat.groupPhoto} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <svg className="w-5 h-5" fill="var(--wa-bg-panel)" viewBox="0 0 24 24">
+                                                    <path d="M12 12.75c1.63 0 3.07.39 4.24.9 1.08.48 1.76 1.56 1.76 2.73V18H6v-1.61c0-1.18.68-2.26 1.76-2.73 1.17-.52 2.61-.91 4.24-.91z" />
+                                                </svg>
+                                            )
+                                        ) : otherUser?.photoURL ? (
+                                            <img src={otherUser.photoURL} alt="" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span className="text-lg font-medium" style={{ color: 'var(--wa-bg-panel)' }}>
+                                                {otherUser?.displayName?.charAt(0).toUpperCase() || '?'}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {!chat?.isGroup && otherUser?.isOnline && (
+                                        <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full" style={{ backgroundColor: 'var(--wa-green)', border: '2px solid var(--wa-bg-header)' }} />
+                                    )}
+                                </div>
+
+                                {/* User Info - Clickable for group info */}
+                                <div
+                                    className={`flex-1 min-w-0 ${chat?.isGroup ? 'cursor-pointer' : ''}`}
+                                    onClick={() => chat?.isGroup && setShowGroupInfo(true)}
+                                >
+                                    <h1 className="font-medium truncate" style={{ color: 'var(--wa-text-primary)' }}>
+                                        {chat?.isGroup ? chat.groupName : otherUser?.displayName || 'Unknown User'}
+                                    </h1>
+                                    <p className="text-sm truncate" style={{ color: 'var(--wa-text-secondary)' }}>
+                                        {typingUsers.length > 0 ? (
+                                            <span style={{ color: 'var(--wa-green)' }}>typing...</span>
+                                        ) : chat?.isGroup ? (
+                                            `${chat.participants.length} members`
+                                        ) : otherUser?.isOnline ? (
+                                            <span style={{ color: 'var(--wa-green)' }}>Online</span>
+                                        ) : (
+                                            `Last seen ${otherUser?.lastSeen ? formatTime(otherUser.lastSeen) : 'recently'}`
+                                        )}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Header actions */}
+                            <div className="flex items-center gap-1 relative">
+                                {/* AI Features Button */}
+                                <button
+                                    className="icon-btn"
+                                    onClick={() => setShowAIPanel(!showAIPanel)}
+                                    title="AI Features"
+                                    style={{ color: showAIPanel ? 'var(--wa-green)' : undefined }}
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                </button>
+
+                                {/* AI Features Panel */}
+                                {showAIPanel && chatId && userProfile && (
+                                    <AIFeaturesPanel
+                                        chatId={chatId}
+                                        messages={messages}
+                                        isGroup={chat?.isGroup || false}
+                                        currentUserId={userProfile.uid}
+                                        participants={groupParticipants}
+                                        onClose={() => setShowAIPanel(false)}
+                                        onSummaryGenerated={(summary) => {
+                                            setConversationSummary(summary);
+                                            setShowSummaryModal(true);
+                                        }}
+                                        onImportantMessagesDetected={(ids) => {
+                                            setImportantMessageIds(ids);
+                                        }}
+                                        onTripPlanGenerated={(plan) => {
+                                            setTripPlan(plan);
+                                            setShowTripModal(true);
+                                        }}
+                                        onSmartRepliesGenerated={(replies) => {
+                                            setSmartReplies(replies);
+                                        }}
+                                        onScheduleMessage={() => {
+                                            setShowAIPanel(false);
+                                            setShowScheduleModal(true);
+                                        }}
+                                        onOpenTripForm={() => {
+                                            setShowAIPanel(false);
+                                            setShowTripForm(true);
+                                        }}
+                                    />
+                                )}
+
+                                <button
+                                    className="icon-btn"
+                                    onClick={() => setShowSearch(true)}
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
+                                </button>
+                                <div className="relative">
+                                    <button
+                                        className="icon-btn"
+                                        onClick={() => setShowChatMenu(!showChatMenu)}
+                                    >
+                                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
+                                        </svg>
+                                    </button>
+                                    <DropdownMenu
+                                        isOpen={showChatMenu}
+                                        onClose={() => setShowChatMenu(false)}
+                                        items={[
+                                            {
+                                                label: chat?.isGroup ? 'Group Info' : 'View Contact',
+                                                icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+                                                onClick: () => {
+                                                    setShowChatMenu(false);
+                                                    chat?.isGroup ? setShowGroupInfo(true) : setShowUserProfile(true);
+                                                }
+                                            },
+                                            {
+                                                label: 'Search in Chat',
+                                                icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
+                                                onClick: () => {
+                                                    setShowChatMenu(false);
+                                                    setShowSearch(true);
+                                                }
+                                            },
+                                            {
+                                                label: 'Mute Notifications',
+                                                icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>,
+                                                onClick: () => { setShowChatMenu(false); /* TODO: Implement mute */ }
+                                            },
+                                            {
+                                                label: 'Clear Chat',
+                                                icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+                                                onClick: () => { setShowChatMenu(false); /* TODO: Implement clear */ },
+                                                danger: true
+                                            }
+                                        ]}
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </header>
 
                 {/* Messages Area */}
@@ -403,36 +491,89 @@ export default function ChatPage() {
                                 </div>
 
                                 {/* Messages */}
-                                {group.messages.map((message) => {
+                                {group.messages.map((message, messageIndex) => {
                                     const isOwn = message.senderId === userProfile?.uid;
                                     const isImportant = importantMessageIds.includes(message.id);
                                     const hasReactions = message.reactions && Object.keys(message.reactions).length > 0;
+
+                                    // Check if previous message in this group was from same sender
+                                    const isFirstInSequence = messageIndex === 0 || group.messages[messageIndex - 1].senderId !== message.senderId;
+                                    // Check if next message is from same sender (for border radius adjustment)
+                                    const isLastInSequence = messageIndex === group.messages.length - 1 || group.messages[messageIndex + 1].senderId !== message.senderId;
+
                                     return (
-                                        <div key={message.id} className={`flex mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                            <div className="relative group">
-                                                {/* Quick reaction picker - shows on hover */}
-                                                <div
-                                                    className={`absolute ${isOwn ? 'right-0' : 'left-0'} -top-8 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 p-1 rounded-full shadow-lg z-10`}
-                                                    style={{ backgroundColor: 'var(--wa-bg-panel)', border: '1px solid var(--wa-border)' }}
-                                                >
-                                                    {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
-                                                        <button
-                                                            key={emoji}
-                                                            onClick={async () => {
-                                                                if (chatId && userProfile?.uid) {
-                                                                    const { toggleMessageReaction } = await import('../services/chatService');
-                                                                    await toggleMessageReaction(chatId, message.id, userProfile.uid, emoji);
-                                                                }
-                                                            }}
-                                                            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-base"
-                                                        >
-                                                            {emoji}
-                                                        </button>
-                                                    ))}
-                                                </div>
+                                        <div key={message.id} className={`flex ${isLastInSequence ? 'mb-2' : 'mb-0.5'} ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                                            <div className="relative group max-w-[65%]">
+                                                {/* Message Action Menu - shows arrow on hover */}
+                                                <MessageActionMenu
+                                                    messageId={message.id}
+                                                    chatId={chatId ?? ''}
+                                                    senderId={message.senderId}
+                                                    content={message.content}
+                                                    isOwn={isOwn}
+                                                    isGroupChat={chat?.isGroup}
+                                                    isStarred={message.starredBy?.includes(userProfile?.uid || '')}
+                                                    isPinned={message.isPinned}
+                                                    onReply={() => {
+                                                        setReplyToMessage(message);
+                                                        inputRef.current?.focus();
+                                                    }}
+                                                    onCopy={() => {
+                                                        navigator.clipboard.writeText(message.content);
+                                                        alert('Message copied to clipboard!');
+                                                    }}
+                                                    onForward={() => {
+                                                        setForwardMessage(message);
+                                                    }}
+                                                    onStar={async () => {
+                                                        if (chatId && userProfile?.uid) {
+                                                            await toggleMessageStar(chatId, message.id, userProfile.uid);
+                                                        }
+                                                    }}
+                                                    onPin={async () => {
+                                                        if (chatId) {
+                                                            await toggleMessagePin(chatId, message.id);
+                                                        }
+                                                    }}
+                                                    onDelete={async () => {
+                                                        if (chatId && confirm('Delete this message?')) {
+                                                            await deleteMessage(chatId, message.id, isOwn);
+                                                        }
+                                                    }}
+                                                    onSelect={() => {
+                                                        // For now, just copy the message
+                                                        navigator.clipboard.writeText(message.content);
+                                                    }}
+                                                    onReplyPrivately={async () => {
+                                                        // Navigate to private chat with sender if in group
+                                                        if (chat?.isGroup && message.senderId !== userProfile?.uid) {
+                                                            const { getOrCreateChat } = await import('../services/chatService');
+                                                            const privateChatId = await getOrCreateChat(userProfile?.uid || '', message.senderId);
+                                                            navigate(`/chat/${privateChatId}`);
+                                                        }
+                                                    }}
+                                                    onReaction={async (emoji) => {
+                                                        if (chatId && userProfile?.uid) {
+                                                            const { toggleMessageReaction } = await import('../services/chatService');
+                                                            await toggleMessageReaction(chatId, message.id, userProfile.uid, emoji);
+                                                        }
+                                                    }}
+                                                    onMoreEmojis={() => setShowMoreEmojis({ messageId: message.id })}
+                                                />
 
                                                 <div
-                                                    className={`${isOwn ? 'message-out' : 'message-in'} ${isImportant ? 'ring-2 ring-yellow-500' : ''}`}
+                                                    className={`
+                                                        relative px-2 py-1 shadow-sm text-[14.2px] leading-[19px] break-words
+                                                        ${isOwn
+                                                            ? `bg-[#d9fdd3] dark:bg-[#005c4b] ml-auto rounded-lg ${isFirstInSequence ? 'rounded-tr-none' : ''}`
+                                                            : `bg-white dark:bg-[#202c33] rounded-lg ${isFirstInSequence ? 'rounded-tl-none' : ''}`
+                                                        }
+                                                        ${isImportant ? 'ring-2 ring-yellow-500' : ''}
+                                                    `}
+                                                    style={{
+                                                        boxShadow: '0 1px 0.5px rgba(11, 20, 26, 0.13)',
+                                                        color: 'var(--wa-text-primary)'
+                                                    }}
                                                 >
                                                     {isImportant && (
                                                         <div className="flex items-center gap-1 mb-1 text-yellow-500 text-xs">
@@ -442,42 +583,51 @@ export default function ChatPage() {
                                                             Important
                                                         </div>
                                                     )}
-                                                    {/* Sender name for group chats */}
-                                                    {chat?.isGroup && !isOwn && (
-                                                        <p className="text-xs font-semibold mb-1" style={{ color: 'var(--wa-green)' }}>
+                                                    {/* Sender name for group chats - Only show on first message of sequence */}
+                                                    {chat?.isGroup && !isOwn && isFirstInSequence && (
+                                                        <p className="text-[12.8px] font-medium mb-1 leading-4" style={{ color: 'var(--wa-green)' }}>
                                                             {groupMemberProfiles.get(message.senderId)?.displayName || 'Unknown'}
                                                         </p>
                                                     )}
-                                                    <p className="break-words">{message.content}</p>
-                                                    <div className={`flex items-center gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                                        <span className="text-xs" style={{ color: 'var(--wa-text-light)' }}>
+
+                                                    <span className="whitespace-pre-wrap">{message.content}</span>
+
+                                                    {/* Time & Status - Float right bottom */}
+                                                    <span className="float-right ml-2 mt-1 flex items-center gap-1 opacity-70" style={{ fontSize: '11px', height: '15px' }}>
+                                                        {/* Star indicator */}
+                                                        {message.starredBy?.includes(userProfile?.uid || '') && (
+                                                            <svg className="w-3 h-3 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                                                                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                                                            </svg>
+                                                        )}
+                                                        <span className="translate-y-px">
                                                             {formatTime(message.timestamp)}
                                                         </span>
                                                         {isOwn && (
-                                                            <span style={{ color: message.status === 'read' ? '#53bdeb' : 'var(--wa-text-light)' }}>
+                                                            <span style={{ color: message.status === 'read' ? '#53bdeb' : 'inherit' }}>
                                                                 {message.status === 'read' || message.status === 'delivered' ? (
-                                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                                    <svg className="w-[16px] h-[16px]" viewBox="0 0 24 24" fill="currentColor">
                                                                         <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
                                                                     </svg>
                                                                 ) : (
-                                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                                    <svg className="w-[16px] h-[16px]" viewBox="0 0 24 24" fill="currentColor">
                                                                         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
                                                                     </svg>
                                                                 )}
                                                             </span>
                                                         )}
-                                                    </div>
+                                                    </span>
                                                 </div>
 
                                                 {/* Display reactions */}
                                                 {hasReactions && (
                                                     <div
-                                                        className={`flex gap-1 mt-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}
+                                                        className={`flex gap-1 mt-[-8px] relative z-10 ${isOwn ? 'justify-end' : 'justify-start'} px-2`}
                                                     >
                                                         {Object.entries(message.reactions || {}).map(([emoji, users]) => (
                                                             <span
                                                                 key={emoji}
-                                                                className="px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5"
+                                                                className="px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5 shadow-sm cursor-pointer hover:bg-gray-50"
                                                                 style={{ backgroundColor: 'var(--wa-bg-panel)', border: '1px solid var(--wa-border)' }}
                                                             >
                                                                 {emoji} {users.length > 1 && users.length}
@@ -510,6 +660,38 @@ export default function ChatPage() {
 
                 {/* Message Input */}
                 <form onSubmit={handleSendMessage} className="wa-header p-3 flex-shrink-0 relative" style={{ borderTop: '1px solid var(--wa-border)' }}>
+                    {/* Reply Preview Bar - WhatsApp style */}
+                    {replyToMessage && (
+                        <div
+                            className="flex items-center gap-3 px-3 py-2 mb-2 rounded-lg"
+                            style={{
+                                backgroundColor: 'var(--wa-bg-input)',
+                                borderLeft: '4px solid var(--wa-green)'
+                            }}
+                        >
+                            <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium" style={{ color: 'var(--wa-green)' }}>
+                                    {replyToMessage.senderId === userProfile?.uid
+                                        ? 'You'
+                                        : (groupMemberProfiles.get(replyToMessage.senderId)?.displayName || otherUser?.displayName || 'Unknown')}
+                                </p>
+                                <p className="text-sm truncate" style={{ color: 'var(--wa-text-secondary)' }}>
+                                    {replyToMessage.content}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setReplyToMessage(null)}
+                                className="flex-shrink-0 p-1 rounded-full hover:bg-black/10"
+                                style={{ color: 'var(--wa-icon)' }}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
+
                     {/* Emoji Picker */}
                     {showEmojiPicker && (
                         <div className="absolute bottom-16 left-4 z-50">
@@ -589,6 +771,18 @@ export default function ChatPage() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                 </svg>
                             )}
+                        </button>
+
+                        {/* AI Rewrite Button */}
+                        <button
+                            type="button"
+                            className="icon-btn"
+                            onClick={() => setShowAIRewrite(true)}
+                            disabled={!newMessage.trim()}
+                            title="Rewrite with AI"
+                            style={{ opacity: newMessage.trim() ? 1 : 0.5 }}
+                        >
+                            <span className="text-lg">✨</span>
                         </button>
 
                         {/* Input */}
@@ -713,6 +907,70 @@ export default function ChatPage() {
                 isOpen={showUserProfile}
                 onClose={() => setShowUserProfile(false)}
             />
+
+            {/* Forward Modal */}
+            <ForwardModal
+                isOpen={!!forwardMessage}
+                messageContent={forwardMessage?.content || ''}
+                onClose={() => setForwardMessage(null)}
+                onForward={async (toChatId) => {
+                    if (forwardMessage && userProfile?.uid) {
+                        await sendMessage(toChatId, userProfile.uid, forwardMessage.content);
+                        setForwardMessage(null);
+                        alert('Message forwarded!');
+                    }
+                }}
+            />
+
+            {/* AI Rewrite Modal */}
+            <AIRewriteModal
+                isOpen={showAIRewrite}
+                originalMessage={newMessage}
+                onClose={() => setShowAIRewrite(false)}
+                onRewrite={(rewrittenMessage) => {
+                    setNewMessage(rewrittenMessage);
+                    inputRef.current?.focus();
+                }}
+            />
+
+            {/* AI Suggestion Bar - show above input when suggestion available */}
+            {aiSuggestion && aiSuggestion.suggestedAction !== 'none' && (
+                <div className="absolute bottom-24 left-4 right-4 z-40">
+                    <AISuggestionBar
+                        suggestion={aiSuggestion}
+                        onAccept={() => {
+                            if (aiSuggestion.suggestedAction === 'reply' && aiSuggestion.suggestedText) {
+                                setNewMessage(aiSuggestion.suggestedText);
+                                inputRef.current?.focus();
+                            } else if (aiSuggestion.suggestedAction === 'schedule_message') {
+                                setShowScheduleModal(true);
+                            }
+                            setAiSuggestion(null);
+                        }}
+                        onDismiss={() => setAiSuggestion(null)}
+                    />
+                </div>
+            )}
+
+            {/* Full Emoji Picker for + button in reactions */}
+            {showMoreEmojis && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowMoreEmojis(null)}>
+                    <div onClick={(e) => e.stopPropagation()}>
+                        <EmojiPicker
+                            theme={Theme.DARK}
+                            onEmojiClick={async (emojiData) => {
+                                if (showMoreEmojis && chatId && userProfile?.uid) {
+                                    const { toggleMessageReaction } = await import('../services/chatService');
+                                    await toggleMessageReaction(chatId, showMoreEmojis.messageId, userProfile.uid, emojiData.emoji);
+                                    setShowMoreEmojis(null);
+                                }
+                            }}
+                            width={350}
+                            height={400}
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

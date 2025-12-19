@@ -26,6 +26,10 @@ export interface Message {
     fileName?: string;
     fileSize?: number;
     reactions?: Record<string, string[]>; // emoji -> userIds who reacted
+    starredBy?: string[]; // userIds who starred this message
+    isPinned?: boolean;
+    isDeleted?: boolean;
+    replyTo?: string; // messageId this is replying to
 }
 
 // Chat interface

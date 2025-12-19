@@ -132,6 +132,20 @@
     border-color: var(--wa-green);
   }
 
+  /* Input with icon wrapper */
+  .input-with-icon {
+    @apply relative;
+  }
+
+  .input-with-icon .icon {
+    @apply absolute left-4 top-1/2 -translate-y-1/2;
+    color: var(--wa-text-light);
+  }
+
+  .input-with-icon .input-field {
+    @apply pl-12;
+  }
+
   /* Chat item hover */
   .chat-item {
     @apply cursor-pointer transition-colors;
@@ -147,15 +161,17 @@
 
   /* Message bubbles */
   .message-out {
-    @apply rounded-lg rounded-tr-none px-3 py-2 max-w-[65%] ml-auto;
+    @apply rounded-lg rounded-tr-none px-2 py-1 max-w-[65%] ml-auto relative shadow-sm text-[14.2px] leading-[19px];
     background-color: var(--wa-bg-message-out);
     color: var(--wa-text-primary);
+    box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
   }
 
   .message-in {
-    @apply rounded-lg rounded-tl-none px-3 py-2 max-w-[65%];
+    @apply rounded-lg rounded-tl-none px-2 py-1 max-w-[65%] relative shadow-sm text-[14.2px] leading-[19px];
     background-color: var(--wa-bg-message-in);
     color: var(--wa-text-primary);
+    box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
   }
 
   /* Avatar */

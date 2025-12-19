@@ -249,3 +249,116 @@ export async function checkAIServiceHealth(): Promise<boolean> {
         return false;
     }
 }
+
+// =====================
+// NEW AI FEATURES
+// =====================
+
+// Types for AI Message Rewrite
+export type RewriteTone = 'professional' | 'casual' | 'short' | 'polite' | 'friendly';
+
+export interface AIRewriteResponse {
+    success: boolean;
+    rewrittenMessage?: string;
+    error?: string;
+}
+
+// Types for AI Chat Actions
+export interface AIChatActionResponse {
+    intent: 'meeting' | 'reminder' | 'question' | 'plan' | 'none';
+    suggestedAction: 'reply' | 'schedule_message' | 'create_reminder' | 'summarize' | 'none';
+    suggestedText?: string;
+}
+
+/**
+ * Rewrite a message in a specific tone using AI
+ */
+export async function rewriteMessage(
+    message: string,
+    tone: RewriteTone
+): Promise<AIRewriteResponse> {
+    if (!message.trim()) {
+        return { success: false, error: 'Message cannot be empty' };
+    }
+
+    try {
+        const systemInstruction = `You are a message rewriting assistant. Rewrite messages in the requested tone while preserving the original meaning. Only return the rewritten message with no additional text, quotes, or explanation.`;
+
+        const prompt = `Rewrite the following message in a ${tone} tone:\n\n"${message}"`;
+
+        const result = await callGeminiAPI(prompt, systemInstruction);
+
+        // Clean up the response - remove quotes if present
+        const rewrittenMessage = result.replace(/^["']|["']$/g, '').trim();
+
+        return { success: true, rewrittenMessage };
+    } catch (error) {
+        console.error('AI rewrite error:', error);
+        return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to rewrite message'
+        };
+    }
+}
+
+/**
+ * Analyze incoming message and suggest actions
+ */
+export async function analyzeMessageIntent(
+    message: string
+): Promise<AIChatActionResponse> {
+    const defaultResponse: AIChatActionResponse = {
+        intent: 'none',
+        suggestedAction: 'none'
+    };
+
+    if (!message.trim() || message.length < 5) {
+        return defaultResponse;
+    }
+
+    try {
+        const systemInstruction = `You are analyzing chat messages to detect intent and suggest helpful actions. Return ONLY a valid JSON object with no other text.`;
+
+        const prompt = `Analyze this incoming chat message and return a JSON object:
+Message: "${message}"
+
+Return format:
+{
+  "intent": "meeting" | "reminder" | "question" | "plan" | "none",
+  "suggestedAction": "reply" | "schedule_message" | "create_reminder" | "summarize" | "none",
+  "suggestedText": "optional suggested reply text"
+}
+
+Rules:
+- "meeting": Message is about scheduling a meeting or appointment
+- "reminder": Message contains a reminder or deadline
+- "question": Message asks a direct question
+- "plan": Message discusses planning something
+- "none": Casual greetings or simple messages
+
+For suggestedAction:
+- "reply": Suggest a helpful reply (include suggestedText)
+- "schedule_message": Suggest scheduling a follow-up message
+- "none": No action needed
+
+If unsure, return intent and suggestedAction as "none".`;
+
+        const result = await callGeminiAPI(prompt, systemInstruction);
+
+        // Try to parse JSON from the response
+        const jsonMatch = result.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+                intent: parsed.intent || 'none',
+                suggestedAction: parsed.suggestedAction || 'none',
+                suggestedText: parsed.suggestedText || undefined
+            };
+        }
+
+        return defaultResponse;
+    } catch (error) {
+        console.error('AI analysis error:', error);
+        return defaultResponse;
+    }
+}

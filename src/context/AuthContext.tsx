@@ -16,6 +16,12 @@ import { auth } from '../config/firebase';
 import { getUserById, updateOnlineStatus, getUserByEmail, getUserByPhone } from '../services/userService';
 import type { UserProfile } from '../types';
 
+declare global {
+    interface Window {
+        recaptchaVerifier: RecaptchaVerifier;
+    }
+}
+
 interface AuthContextType {
     firebaseUser: User | null;
     userProfile: UserProfile | null;
@@ -143,6 +149,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+
+    // ... existing code ...
+
     // Phone Sign-in function - Step 1: Send OTP
     const loginWithPhone = async (phoneNumber: string): Promise<void> => {
         try {
@@ -155,8 +164,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 recaptchaContainer.innerHTML = '';
             }
 
+            if (window.recaptchaVerifier) {
+                try {
+                    window.recaptchaVerifier.clear();
+                } catch (e) {
+                    // Ignore clear errors
+                }
+            }
+
             // Create new reCAPTCHA verifier
-            const recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
                 size: 'invisible',
                 callback: () => {
                     console.log('reCAPTCHA verified');
@@ -167,9 +184,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
 
             // Render the reCAPTCHA
-            await recaptchaVerifier.render();
+            await window.recaptchaVerifier.render();
 
-            const confirmation = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+            const confirmation = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
             setConfirmationResult(confirmation);
         } catch (err) {
             console.error('Phone auth error:', err);

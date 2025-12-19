@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -34,6 +34,9 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
     const [showMenu, setShowMenu] = useState(false);
     const { logout } = useAuth();
 
+    // Cache for user profiles to reduce Firestore reads (Firebase free tier optimization)
+    const userProfileCache = useRef<Map<string, UserProfile>>(new Map());
+
     // Subscribe to user's chats
     useEffect(() => {
         if (!userProfile?.uid) {
@@ -52,8 +55,16 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                         (id) => id !== userProfile.uid
                     );
                     if (otherUserId) {
-                        const otherUser = await getUserById(otherUserId);
-                        return { ...chat, otherUser };
+                        // Check cache first (Firebase optimization)
+                        let otherUser: UserProfile | null | undefined = userProfileCache.current.get(otherUserId);
+                        if (!otherUser) {
+                            const fetchedUser = await getUserById(otherUserId);
+                            if (fetchedUser) {
+                                userProfileCache.current.set(otherUserId, fetchedUser);
+                                otherUser = fetchedUser;
+                            }
+                        }
+                        return { ...chat, otherUser: otherUser ?? null };
                     }
                     return { ...chat, otherUser: null };
                 })

@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import OnlineStatusHeartbeat from './components/OnlineStatusHeartbeat';
 import ScheduledMessageProcessor from './components/ScheduledMessageProcessor';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
@@ -18,6 +19,7 @@ function App() {
                 <AuthProvider>
                     {/* Process scheduled messages in background */}
                     <ScheduledMessageProcessor />
+                    <OnlineStatusHeartbeat />
                     <Routes>
                         {/* Public routes */}
                         <Route path="/login" element={<LoginPage />} />

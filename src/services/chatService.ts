@@ -10,6 +10,7 @@ import {
     Timestamp,
     orderBy,
     limit,
+    limitToLast,
     onSnapshot,
     addDoc
 } from 'firebase/firestore';
@@ -208,7 +209,7 @@ export function subscribeToChatMessages(
     callback: (messages: Message[]) => void
 ): () => void {
     const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
-    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    const q = query(messagesRef, orderBy('timestamp', 'asc'), limitToLast(100));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const messages = snapshot.docs.map(doc => {
@@ -438,6 +439,7 @@ export async function leaveGroup(
 
 /**
  * Toggle a reaction on a message
+ * Only allows ONE reaction per user - removes user from other reactions when adding new one
  */
 export async function toggleMessageReaction(
     chatId: string,
@@ -452,28 +454,107 @@ export async function toggleMessageReaction(
         throw new Error('Message not found');
     }
 
-    const currentReactions = messageDoc.data().reactions || {};
+    const currentReactions: Record<string, string[]> = messageDoc.data().reactions || {};
     const usersWithReaction = currentReactions[emoji] || [];
 
-    let newReactions: Record<string, string[]>;
+    let newReactions: Record<string, string[]> = {};
 
     if (usersWithReaction.includes(userId)) {
-        // Remove reaction
-        const filtered = usersWithReaction.filter((id: string) => id !== userId);
-        if (filtered.length === 0) {
-            // Remove the emoji key entirely if no users left
-            const { [emoji]: _removed, ...rest } = currentReactions;
-            newReactions = rest;
-        } else {
-            newReactions = { ...currentReactions, [emoji]: filtered };
-        }
+        // User is removing their current reaction
+        // Just remove user from this emoji
+        Object.entries(currentReactions).forEach(([reactionEmoji, users]) => {
+            const filtered = users.filter((id: string) => id !== userId);
+            if (filtered.length > 0) {
+                newReactions[reactionEmoji] = filtered;
+            }
+        });
     } else {
-        // Add reaction
-        newReactions = {
-            ...currentReactions,
-            [emoji]: [...usersWithReaction, userId]
-        };
+        // User is adding a new reaction
+        // First, remove user from ALL other reactions (only 1 reaction per user)
+        Object.entries(currentReactions).forEach(([reactionEmoji, users]) => {
+            const filtered = users.filter((id: string) => id !== userId);
+            if (filtered.length > 0) {
+                newReactions[reactionEmoji] = filtered;
+            }
+        });
+
+        // Then add user to the new reaction
+        newReactions[emoji] = [...(newReactions[emoji] || []), userId];
     }
 
     await updateDoc(messageRef, { reactions: newReactions });
+}
+
+/**
+ * Delete a message
+ */
+export async function deleteMessage(
+    chatId: string,
+    messageId: string,
+    deleteForEveryone: boolean = false
+): Promise<void> {
+    const messageRef = doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, messageId);
+
+    if (deleteForEveryone) {
+        // Update message content to show it was deleted
+        await updateDoc(messageRef, {
+            content: 'This message was deleted',
+            isDeleted: true,
+            deletedAt: serverTimestamp()
+        });
+    } else {
+        // Mark as deleted for current user (soft delete)
+        await updateDoc(messageRef, {
+            isDeleted: true,
+            deletedAt: serverTimestamp()
+        });
+    }
+}
+
+/**
+ * Star/unstar a message
+ */
+export async function toggleMessageStar(
+    chatId: string,
+    messageId: string,
+    userId: string
+): Promise<void> {
+    const messageRef = doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, messageId);
+    const messageSnap = await getDoc(messageRef);
+
+    if (!messageSnap.exists()) return;
+
+    const currentStarred: string[] = messageSnap.data().starredBy || [];
+
+    if (currentStarred.includes(userId)) {
+        // Remove star
+        await updateDoc(messageRef, {
+            starredBy: currentStarred.filter(id => id !== userId)
+        });
+    } else {
+        // Add star
+        await updateDoc(messageRef, {
+            starredBy: [...currentStarred, userId]
+        });
+    }
+}
+
+/**
+ * Pin a message in a chat
+ */
+export async function toggleMessagePin(
+    chatId: string,
+    messageId: string
+): Promise<void> {
+    const messageRef = doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, messageId);
+    const messageSnap = await getDoc(messageRef);
+
+    if (!messageSnap.exists()) return;
+
+    const isPinned = messageSnap.data().isPinned || false;
+
+    await updateDoc(messageRef, {
+        isPinned: !isPinned,
+        pinnedAt: !isPinned ? serverTimestamp() : null
+    });
 }

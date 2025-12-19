@@ -118,27 +118,35 @@ export async function getChatScheduledMessages(chatId: string): Promise<Schedule
 
 /**
  * Get upcoming scheduled messages that are due to be sent
+ * Note: This may fail with permission error if Firestore rules don't allow
+ * querying all messages. We handle this silently.
  */
 export async function getUpcomingScheduledMessages(): Promise<ScheduledMessage[]> {
-    const now = new Date();
-    const scheduledRef = collection(db, SCHEDULED_MESSAGES_COLLECTION);
-    const q = query(
-        scheduledRef,
-        where('status', '==', 'pending'),
-        where('scheduledFor', '<=', Timestamp.fromDate(now)),
-        orderBy('scheduledFor', 'asc')
-    );
+    try {
+        const now = new Date();
+        const scheduledRef = collection(db, SCHEDULED_MESSAGES_COLLECTION);
+        const q = query(
+            scheduledRef,
+            where('status', '==', 'pending'),
+            where('scheduledFor', '<=', Timestamp.fromDate(now)),
+            orderBy('scheduledFor', 'asc')
+        );
 
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-            ...data,
-            id: doc.id,
-            scheduledFor: (data.scheduledFor as Timestamp)?.toDate() || new Date(),
-            createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
-        } as ScheduledMessage;
-    });
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                ...data,
+                id: doc.id,
+                scheduledFor: (data.scheduledFor as Timestamp)?.toDate() || new Date(),
+                createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
+            } as ScheduledMessage;
+        });
+    } catch (error) {
+        // Silently handle permission errors - this is expected when Firestore rules
+        // don't allow querying all scheduled messages
+        return [];
+    }
 }
 
 /**
