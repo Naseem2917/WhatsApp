@@ -13,10 +13,12 @@ import {
     removeGroupMember
 } from '../services/chatService';
 import { getUserById } from '../services/userService';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 import AIFeaturesPanel from '../components/chat/AIFeaturesPanel';
 import ConversationSummaryModal from '../components/chat/ConversationSummaryModal';
 import ScheduleMessageModal from '../components/chat/ScheduleMessageModal';
 import TripPlannerModal from '../components/chat/TripPlannerModal';
+import TripPlannerFormModal from '../components/chat/TripPlannerFormModal';
 import SmartRepliesPanel from '../components/chat/SmartRepliesPanel';
 import GroupInfoPanel from '../components/chat/GroupInfoPanel';
 import type { Chat, Message, UserProfile } from '../types';
@@ -48,6 +50,8 @@ export default function ChatPage() {
     const [groupParticipants, setGroupParticipants] = useState<Array<{ name: string; location: string }>>([]);
     const [groupMemberProfiles, setGroupMemberProfiles] = useState<Map<string, UserProfile>>(new Map());
     const [showGroupInfo, setShowGroupInfo] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [showTripForm, setShowTripForm] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -218,9 +222,9 @@ export default function ChatPage() {
     }
 
     return (
-        <div className="min-h-screen flex" style={{ backgroundColor: 'var(--wa-bg-chat)' }}>
-            {/* Sidebar - visible on desktop */}
-            <div className="hidden sm:block">
+        <div className="h-screen flex overflow-hidden" style={{ backgroundColor: 'var(--wa-bg-chat)' }}>
+            {/* Sidebar - visible on desktop, has its own scroll */}
+            <div className="hidden sm:block h-full overflow-hidden">
                 <Sidebar
                     isOpen={sidebarOpen}
                     onClose={() => setSidebarOpen(false)}
@@ -228,8 +232,8 @@ export default function ChatPage() {
                 />
             </div>
 
-            {/* Chat Area */}
-            <div className="flex-1 flex flex-col min-w-0">
+            {/* Chat Area - flex column with fixed header/footer */}
+            <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
                 {/* Chat Header */}
                 <header className="wa-header h-[60px] flex items-center px-4 flex-shrink-0" style={{ borderBottom: '1px solid var(--wa-border)' }}>
                     <div className="flex items-center gap-3 flex-1">
@@ -322,6 +326,10 @@ export default function ChatPage() {
                                 onScheduleMessage={() => {
                                     setShowAIPanel(false);
                                     setShowScheduleModal(true);
+                                }}
+                                onOpenTripForm={() => {
+                                    setShowAIPanel(false);
+                                    setShowTripForm(true);
                                 }}
                             />
                         )}
@@ -421,10 +429,30 @@ export default function ChatPage() {
                 </div>
 
                 {/* Message Input */}
-                <form onSubmit={handleSendMessage} className="wa-header p-3 flex-shrink-0" style={{ borderTop: '1px solid var(--wa-border)' }}>
+                <form onSubmit={handleSendMessage} className="wa-header p-3 flex-shrink-0 relative" style={{ borderTop: '1px solid var(--wa-border)' }}>
+                    {/* Emoji Picker */}
+                    {showEmojiPicker && (
+                        <div className="absolute bottom-16 left-4 z-50">
+                            <EmojiPicker
+                                theme={Theme.DARK}
+                                onEmojiClick={(emojiData) => {
+                                    setNewMessage(prev => prev + emojiData.emoji);
+                                    inputRef.current?.focus();
+                                }}
+                                width={300}
+                                height={350}
+                            />
+                        </div>
+                    )}
+
                     <div className="flex items-center gap-2">
                         {/* Emoji */}
-                        <button type="button" className="icon-btn">
+                        <button
+                            type="button"
+                            className="icon-btn"
+                            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                            style={{ color: showEmojiPicker ? 'var(--wa-green)' : undefined }}
+                        >
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
@@ -541,6 +569,17 @@ export default function ChatPage() {
                     }}
                 />
             )}
+
+            {/* Trip Planner Form Modal */}
+            <TripPlannerFormModal
+                isOpen={showTripForm}
+                onClose={() => setShowTripForm(false)}
+                participants={groupParticipants}
+                onPlanGenerated={(plan) => {
+                    setTripPlan(plan);
+                    setShowTripModal(true);
+                }}
+            />
         </div>
     );
 }

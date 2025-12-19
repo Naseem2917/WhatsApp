@@ -1,14 +1,17 @@
 /**
- * AI Service - Frontend client for Cloudflare Worker AI endpoints
+ * AI Service - Frontend client for Cloudflare Worker with Gemini API
+ * 
+ * This service sends requests to your Cloudflare Worker which returns:
+ * { success: true, text: "AI response text", raw: {...} }
  */
 
-// Worker URL - Update this after deployment
-// For development, you can use wrangler dev which runs on localhost:8787
-const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
+// Worker URL from environment or fallback
+const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://whatsapp.khannaseem1704.workers.dev';
 
 interface Message {
     id?: string;
-    sender: string;
+    sender?: string;
+    senderId?: string;
     content: string;
     timestamp?: string;
     isOwn?: boolean;
@@ -19,46 +22,78 @@ interface Participant {
     location: string;
 }
 
-interface ScheduledMessageResponse {
-    success: boolean;
-    scheduledMessage: {
-        content: string;
-        scheduledFor: string;
-        recipient: string;
-        status: string;
-    };
-    message: string;
+// Response format from YOUR Worker
+interface WorkerResponse {
+    success?: boolean;
+    text?: string;
+    error?: string;
+    raw?: unknown;
+}
+
+/**
+ * Helper function to extract text from Worker response
+ */
+function extractWorkerText(response: WorkerResponse): string {
+    if (response.error) {
+        throw new Error(response.error);
+    }
+
+    if (!response.text) {
+        throw new Error('No response from AI');
+    }
+
+    return response.text.trim();
+}
+
+/**
+ * Helper function to make AI API calls
+ */
+async function callGeminiAPI(prompt: string, systemInstruction: string): Promise<string> {
+    try {
+        const response = await fetch(WORKER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt,
+                systemInstruction,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({})) as WorkerResponse;
+            throw new Error(errorData.error || `API error: ${response.status}`);
+        }
+
+        const data = await response.json() as WorkerResponse;
+        return extractWorkerText(data);
+    } catch (error) {
+        console.error('AI API call failed:', error);
+        throw error instanceof Error ? error : new Error('AI service unavailable');
+    }
 }
 
 /**
  * Get AI-generated summary of a conversation
  */
-export async function getConversationSummary(
-    messages: Message[]
-): Promise<string> {
-    try {
-        const response = await fetch(`${WORKER_URL}/api/summarize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messages: messages.map(m => ({
-                    sender: m.sender,
-                    content: m.content,
-                    timestamp: m.timestamp || new Date().toISOString(),
-                })),
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to get summary');
-        }
-
-        const data = await response.json() as { summary: string };
-        return data.summary;
-    } catch (error) {
-        console.error('AI Summary error:', error);
-        throw error;
+export async function getConversationSummary(messages: Message[]): Promise<string> {
+    if (messages.length < 3) {
+        throw new Error('Need at least 3 messages to summarize');
     }
+
+    const conversation = messages
+        .map(m => `${m.sender || m.senderId || 'User'}: ${m.content}`)
+        .join('\n');
+
+    const systemInstruction = `You are a conversation summarizer. Analyze the chat and provide a concise summary highlighting:
+- Key decisions made
+- Important dates/times mentioned  
+- Action items or tasks
+- Main topics discussed
+Format the response with clear sections using markdown headers.`;
+
+    const prompt = `Summarize this conversation:\n\n${conversation}`;
+
+    return await callGeminiAPI(prompt, systemInstruction);
 }
 
 /**
@@ -68,30 +103,39 @@ export async function detectImportantMessages(
     messages: Message[],
     currentUserId: string
 ): Promise<string[]> {
+    if (messages.length === 0) {
+        return [];
+    }
+
+    const messagesWithIds = messages
+        .filter(m => m.id)
+        .map(m => `[ID:${m.id}] ${m.sender || m.senderId}: ${m.content}`)
+        .join('\n');
+
+    const systemInstruction = `You are analyzing chat messages to find important ones that need attention. Identify messages that:
+- Ask direct questions
+- Request action or response
+- Mention deadlines or urgency
+- Contain important information
+
+Return ONLY a JSON array of message IDs that are important. 
+Example format: ["id1", "id2", "id3"]
+If no messages are important, return: []`;
+
+    const prompt = `Current user ID: ${currentUserId}\n\nFind important messages in this chat:\n\n${messagesWithIds}\n\nReturn ONLY the JSON array of IDs, nothing else.`;
+
     try {
-        const response = await fetch(`${WORKER_URL}/api/importance`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messages: messages.map(m => ({
-                    id: m.id,
-                    sender: m.sender,
-                    content: m.content,
-                    timestamp: m.timestamp || new Date().toISOString(),
-                })),
-                userId: currentUserId,
-            }),
-        });
+        const result = await callGeminiAPI(prompt, systemInstruction);
 
-        if (!response.ok) {
-            throw new Error('Failed to detect important messages');
+        // Parse the JSON array from the response
+        const match = result.match(/\[.*\]/s);
+        if (match) {
+            return JSON.parse(match[0]) as string[];
         }
-
-        const data = await response.json() as { importantMessages: string[] };
-        return data.importantMessages;
+        return [];
     } catch (error) {
-        console.error('AI Importance detection error:', error);
-        throw error;
+        console.error('Failed to detect important messages:', error);
+        return [];
     }
 }
 
@@ -102,60 +146,31 @@ export async function generateTripPlan(
     messages: Message[],
     participants: Participant[]
 ): Promise<string> {
-    try {
-        const response = await fetch(`${WORKER_URL}/api/trip-plan`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messages: messages.map(m => ({
-                    sender: m.sender,
-                    content: m.content,
-                })),
-                participants,
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to generate trip plan');
-        }
-
-        const data = await response.json() as { tripPlan: string };
-        return data.tripPlan;
-    } catch (error) {
-        console.error('AI Trip planner error:', error);
-        throw error;
+    if (messages.length === 0) {
+        throw new Error('No conversation to analyze');
     }
-}
 
-/**
- * Schedule a message to be sent at a specific time
- */
-export async function scheduleMessage(
-    messageContent: string,
-    scheduledTime: Date,
-    recipientName?: string
-): Promise<ScheduledMessageResponse> {
-    try {
-        const response = await fetch(`${WORKER_URL}/api/schedule`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messageContent,
-                scheduledTime: scheduledTime.toISOString(),
-                recipientName,
-            }),
-        });
+    const conversation = messages
+        .map(m => `${m.sender || m.senderId}: ${m.content}`)
+        .join('\n');
 
-        if (!response.ok) {
-            const error = await response.json() as { error: string };
-            throw new Error(error.error || 'Failed to schedule message');
-        }
+    const participantList = participants
+        .map(p => `- ${p.name} (from ${p.location})`)
+        .join('\n');
 
-        return await response.json() as ScheduledMessageResponse;
-    } catch (error) {
-        console.error('Schedule message error:', error);
-        throw error;
-    }
+    const systemInstruction = `You are a trip planning assistant. Based on the group chat discussion, create a comprehensive trip plan including:
+- Suggested destination based on the conversation
+- Proposed dates/times from the discussion
+- Departure schedule from each participant's location
+- Things each person should prepare
+- Meeting points
+- Estimated budget if discussed
+
+Format with clear sections using markdown headers and bullet points.`;
+
+    const prompt = `Group members:\n${participantList}\n\nConversation about the trip:\n${conversation}\n\nCreate a detailed trip plan based on this discussion.`;
+
+    return await callGeminiAPI(prompt, systemInstruction);
 }
 
 /**
@@ -163,32 +178,60 @@ export async function scheduleMessage(
  */
 export async function getSmartReplies(
     messages: Message[],
-    context?: string
+    _context?: string
 ): Promise<string[]> {
-    try {
-        const response = await fetch(`${WORKER_URL}/api/smart-reply`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                messages: messages.map(m => ({
-                    sender: m.sender,
-                    content: m.content,
-                    isOwn: m.isOwn,
-                })),
-                context,
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to get smart replies');
-        }
-
-        const data = await response.json() as { suggestions: string[] };
-        return data.suggestions;
-    } catch (error) {
-        console.error('Smart reply error:', error);
-        throw error;
+    if (messages.length === 0) {
+        return ['👍', 'Okay!', 'Got it'];
     }
+
+    const recentMessages = messages
+        .slice(-5)
+        .map(m => `${m.isOwn ? 'You' : (m.sender || 'Other')}: ${m.content}`)
+        .join('\n');
+
+    const systemInstruction = `Generate exactly 3 natural, contextual reply suggestions based on the conversation. 
+Keep replies short (under 10 words each), casual, and appropriate for WhatsApp.
+Return ONLY a JSON array of exactly 3 strings.
+Example format: ["Sure, sounds good!", "I'll check and let you know", "Thanks!"]`;
+
+    const prompt = `Recent conversation:\n${recentMessages}\n\nGenerate 3 reply suggestions as a JSON array.`;
+
+    try {
+        const result = await callGeminiAPI(prompt, systemInstruction);
+
+        const match = result.match(/\[.*\]/s);
+        if (match) {
+            const suggestions = JSON.parse(match[0]) as string[];
+            return suggestions.slice(0, 3);
+        }
+        return ['👍', 'Okay!', 'Got it'];
+    } catch (error) {
+        console.error('Failed to get smart replies:', error);
+        return ['👍', 'Okay!', 'Got it'];
+    }
+}
+
+/**
+ * Schedule a message (local validation only - actual scheduling uses Firestore)
+ */
+export async function scheduleMessage(
+    messageContent: string,
+    scheduledTime: Date,
+    recipientName?: string
+): Promise<{ success: boolean; message: string }> {
+    if (!messageContent.trim()) {
+        throw new Error('Message content is required');
+    }
+
+    if (scheduledTime <= new Date()) {
+        throw new Error('Scheduled time must be in the future');
+    }
+
+    // This just validates - actual persistence is done via Firestore service
+    return {
+        success: true,
+        message: `Message scheduled for ${scheduledTime.toLocaleString()} to ${recipientName || 'recipient'}`
+    };
 }
 
 /**
@@ -196,7 +239,11 @@ export async function getSmartReplies(
  */
 export async function checkAIServiceHealth(): Promise<boolean> {
     try {
-        const response = await fetch(`${WORKER_URL}/health`);
+        const response = await fetch(WORKER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: 'Hi', systemInstruction: 'Reply with OK' }),
+        });
         return response.ok;
     } catch {
         return false;

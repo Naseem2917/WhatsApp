@@ -24,6 +24,7 @@ interface AIFeaturesPanelProps {
     onTripPlanGenerated: (plan: string) => void;
     onSmartRepliesGenerated: (replies: string[]) => void;
     onScheduleMessage: () => void;
+    onOpenTripForm?: () => void;
 }
 
 export default function AIFeaturesPanel({
@@ -37,6 +38,7 @@ export default function AIFeaturesPanel({
     onTripPlanGenerated,
     onSmartRepliesGenerated,
     onScheduleMessage,
+    onOpenTripForm,
 }: AIFeaturesPanelProps) {
     const [loading, setLoading] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -58,8 +60,13 @@ export default function AIFeaturesPanel({
             onSummaryGenerated(summary);
             onClose();
         } catch (err) {
-            setError('Failed to generate summary');
-            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            if (errorMessage.includes('API') || errorMessage.includes('fetch') || errorMessage.includes('network')) {
+                setError('AI temporarily unavailable. Try again.');
+            } else {
+                setError(errorMessage || 'Failed to generate summary');
+            }
+            console.error('Summarize error:', err);
         } finally {
             setLoading(null);
         }
@@ -79,8 +86,13 @@ export default function AIFeaturesPanel({
             onImportantMessagesDetected(importantIds);
             onClose();
         } catch (err) {
-            setError('Failed to detect important messages');
-            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            if (errorMessage.includes('API') || errorMessage.includes('fetch') || errorMessage.includes('network')) {
+                setError('AI temporarily unavailable. Try again.');
+            } else {
+                setError(errorMessage || 'Failed to detect important messages');
+            }
+            console.error('Detect important error:', err);
         } finally {
             setLoading(null);
         }
@@ -106,8 +118,13 @@ export default function AIFeaturesPanel({
             onTripPlanGenerated(plan);
             onClose();
         } catch (err) {
-            setError('Failed to generate trip plan');
-            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            if (errorMessage.includes('API') || errorMessage.includes('fetch') || errorMessage.includes('network')) {
+                setError('AI temporarily unavailable. Try again.');
+            } else {
+                setError(errorMessage || 'Failed to generate trip plan');
+            }
+            console.error('Trip plan error:', err);
         } finally {
             setLoading(null);
         }
@@ -130,8 +147,13 @@ export default function AIFeaturesPanel({
             onSmartRepliesGenerated(replies);
             onClose();
         } catch (err) {
-            setError('Failed to generate smart replies');
-            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+            if (errorMessage.includes('API') || errorMessage.includes('fetch') || errorMessage.includes('network')) {
+                setError('AI temporarily unavailable. Try again.');
+            } else {
+                setError(errorMessage || 'Failed to generate smart replies');
+            }
+            console.error('Smart replies error:', err);
         } finally {
             setLoading(null);
         }
@@ -191,8 +213,15 @@ export default function AIFeaturesPanel({
                 </svg>
             ),
             label: 'Plan Trip',
-            description: 'Generate a trip plan from chat discussion',
-            onClick: handleTripPlan,
+            description: 'Plan a trip with destination, dates & more',
+            onClick: () => {
+                if (onOpenTripForm) {
+                    onOpenTripForm();
+                    onClose();
+                } else {
+                    handleTripPlan();
+                }
+            },
         }] : []),
     ];
 
