@@ -5,6 +5,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { subscribeToUserChats } from '../../services/chatService';
 import { getUserById } from '../../services/userService';
 import { NewChatModal, CreateGroupModal } from '../chat';
+import { DropdownMenu } from '../common';
 import type { Chat, UserProfile } from '../../types';
 
 interface SidebarProps {
@@ -30,6 +31,8 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
     const [showNewChatModal, setShowNewChatModal] = useState(false);
     const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
     const [filter, setFilter] = useState<FilterType>('all');
+    const [showMenu, setShowMenu] = useState(false);
+    const { logout } = useAuth();
 
     // Subscribe to user's chats
     useEffect(() => {
@@ -64,7 +67,17 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
 
     // Filter chats
     const filteredChats = chats.filter((chat) => {
+        // Apply filter type
         if (filter === 'groups' && !chat.isGroup) return false;
+        if (filter === 'unread') {
+            const unreadCount = userProfile?.uid ? (chat.unreadCount?.[userProfile.uid] || 0) : 0;
+            if (unreadCount === 0) return false;
+        }
+        if (filter === 'favorites') {
+            if (!chat.favorites?.includes(userProfile?.uid || '')) return false;
+        }
+
+        // Apply search query
         if (searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
             if (chat.isGroup) {
@@ -160,11 +173,44 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                             </svg>
                         </button>
                         {/* Menu */}
-                        <button className="icon-btn">
-                            <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
-                            </svg>
-                        </button>
+                        <div className="relative">
+                            <button
+                                onClick={() => setShowMenu(!showMenu)}
+                                className="icon-btn"
+                                title="Menu"
+                            >
+                                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
+                                </svg>
+                            </button>
+                            <DropdownMenu
+                                isOpen={showMenu}
+                                onClose={() => setShowMenu(false)}
+                                items={[
+                                    {
+                                        label: 'New Group',
+                                        icon: <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M19.005 3.175H4.674C3.642 3.175 3 3.789 3 4.821V21.02l3.544-3.514h12.461c1.033 0 2.064-1.06 2.064-2.093V4.821c-.001-1.032-1.032-1.646-2.064-1.646z" /></svg>,
+                                        onClick: () => setShowCreateGroupModal(true)
+                                    },
+                                    {
+                                        label: 'Settings',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+                                        onClick: () => navigate('/settings')
+                                    },
+                                    {
+                                        label: 'Profile',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+                                        onClick: () => navigate('/profile')
+                                    },
+                                    {
+                                        label: 'Logout',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>,
+                                        onClick: async () => { await logout(); navigate('/login'); },
+                                        danger: true
+                                    }
+                                ]}
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -265,19 +311,43 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                                             <h3 className="font-normal truncate" style={{ color: 'var(--wa-text-primary)' }}>
                                                 {displayName}
                                             </h3>
-                                            <span className="text-xs ml-2 flex-shrink-0" style={{ color: 'var(--wa-text-light)' }}>
-                                                {time}
-                                            </span>
+                                            <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                                                <span className="text-xs" style={{ color: (chat.unreadCount?.[userProfile?.uid || ''] || 0) > 0 ? 'var(--wa-green)' : 'var(--wa-text-light)' }}>
+                                                    {time}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <p className="text-sm truncate mt-0.5" style={{ color: 'var(--wa-text-secondary)' }}>
-                                            {lastMessage}
-                                        </p>
+                                        <div className="flex items-center justify-between mt-0.5">
+                                            <p className="text-sm truncate" style={{ color: 'var(--wa-text-secondary)' }}>
+                                                {lastMessage}
+                                            </p>
+                                            {(chat.unreadCount?.[userProfile?.uid || ''] || 0) > 0 && (
+                                                <span
+                                                    className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full flex items-center justify-center text-xs font-medium text-white flex-shrink-0"
+                                                    style={{ backgroundColor: 'var(--wa-green)' }}
+                                                >
+                                                    {chat.unreadCount?.[userProfile?.uid || ''] || 0}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })
                     )}
                 </div>
+
+                {/* FAB - New Chat Button for Mobile */}
+                <button
+                    onClick={() => setShowNewChatModal(true)}
+                    className="sm:hidden fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-50 transition-transform hover:scale-110 active:scale-95"
+                    style={{ backgroundColor: 'var(--wa-green)' }}
+                    title="New chat"
+                >
+                    <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                </button>
             </aside>
 
             {/* Modals */}

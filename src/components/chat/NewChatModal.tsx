@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { searchAllUsers } from '../../services/userService';
-import { getOrCreateChat } from '../../services/chatService';
+import { searchAllUsers, getUserById } from '../../services/userService';
+import { getOrCreateChat, getUserChats } from '../../services/chatService';
 import type { UserProfile } from '../../types';
 
 interface NewChatModalProps {
@@ -16,8 +16,44 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
 
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+    const [recentContacts, setRecentContacts] = useState<UserProfile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [isCreatingChat, setIsCreatingChat] = useState(false);
+    const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+
+    // Load recent contacts when modal opens
+    useEffect(() => {
+        if (isOpen && userProfile?.uid) {
+            loadRecentContacts();
+        }
+    }, [isOpen, userProfile?.uid]);
+
+    const loadRecentContacts = async () => {
+        if (!userProfile?.uid) return;
+
+        setIsLoadingContacts(true);
+        try {
+            const chats = await getUserChats(userProfile.uid);
+            const contacts: UserProfile[] = [];
+
+            for (const chat of chats.slice(0, 10)) { // Get last 10 chats
+                if (!chat.isGroup) {
+                    const otherUserId = chat.participants.find(id => id !== userProfile.uid);
+                    if (otherUserId) {
+                        const otherUser = await getUserById(otherUserId);
+                        if (otherUser && !contacts.find(c => c.uid === otherUser.uid)) {
+                            contacts.push(otherUser);
+                        }
+                    }
+                }
+            }
+            setRecentContacts(contacts);
+        } catch (err) {
+            console.error('Error loading recent contacts:', err);
+        } finally {
+            setIsLoadingContacts(false);
+        }
+    };
 
     // Debounced search
     const performSearch = useCallback(async (query: string) => {
@@ -133,12 +169,65 @@ export default function NewChatModal({ isOpen, onClose }: NewChatModalProps) {
 
                 {/* Results */}
                 <div className="max-h-80 overflow-y-auto" style={{ backgroundColor: 'var(--wa-bg-panel)' }}>
+                    {/* Show recent contacts when no search query */}
+                    {!searchQuery && recentContacts.length > 0 && (
+                        <>
+                            <div className="px-4 py-2" style={{ color: 'var(--wa-text-light)' }}>
+                                <p className="text-xs uppercase tracking-wide font-medium">Frequently contacted</p>
+                            </div>
+                            {recentContacts.map((user) => (
+                                <button
+                                    key={user.uid}
+                                    onClick={() => handleStartChat(user)}
+                                    disabled={isCreatingChat}
+                                    className="w-full flex items-center gap-3 px-4 py-3 chat-item disabled:opacity-50"
+                                >
+                                    <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center" style={{ backgroundColor: 'var(--wa-icon)' }}>
+                                        {user.photoURL ? (
+                                            <img src={user.photoURL} alt="" className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span className="text-lg font-medium" style={{ color: 'var(--wa-bg-panel)' }}>
+                                                {user.displayName?.charAt(0).toUpperCase() || '?'}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0 text-left">
+                                        <h3 className="font-medium truncate" style={{ color: 'var(--wa-text-primary)' }}>
+                                            {user.displayName}
+                                        </h3>
+                                        <p className="text-sm truncate" style={{ color: 'var(--wa-text-secondary)' }}>
+                                            @{user.username}
+                                        </p>
+                                    </div>
+                                    {user.isOnline && (
+                                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: 'var(--wa-green)' }} />
+                                    )}
+                                </button>
+                            ))}
+                        </>
+                    )}
+
+                    {/* Loading state for recent contacts */}
+                    {!searchQuery && isLoadingContacts && (
+                        <div className="p-8 text-center">
+                            <div className="spinner w-6 h-6 mx-auto" />
+                        </div>
+                    )}
+
+                    {/* No contacts yet */}
+                    {!searchQuery && !isLoadingContacts && recentContacts.length === 0 && (
+                        <div className="p-8 text-center" style={{ color: 'var(--wa-text-light)' }}>
+                            <p className="text-sm">Search for users to start a chat</p>
+                        </div>
+                    )}
+
+                    {/* Search results */}
                     {searchQuery.length >= 2 && searchResults.length === 0 && !isSearching ? (
                         <div className="p-8 text-center" style={{ color: 'var(--wa-text-light)' }}>
                             <p className="text-sm">No users found</p>
                         </div>
                     ) : (
-                        searchResults.map((user) => (
+                        searchQuery.length >= 2 && searchResults.map((user) => (
                             <button
                                 key={user.uid}
                                 onClick={() => handleStartChat(user)}

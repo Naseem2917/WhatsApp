@@ -22,6 +22,10 @@ export interface Message {
     timestamp: Date;
     status: 'sent' | 'delivered' | 'read';
     type: 'text' | 'image' | 'file';
+    fileUrl?: string;
+    fileName?: string;
+    fileSize?: number;
+    reactions?: Record<string, string[]>; // emoji -> userIds who reacted
 }
 
 // Chat interface
@@ -35,6 +39,8 @@ export interface Chat {
     groupName?: string;
     groupPhoto?: string;
     admins?: string[];
+    unreadCount?: Record<string, number>; // userId -> unread count
+    favorites?: string[]; // userIds who favorited this chat
 }
 
 // Auth context state

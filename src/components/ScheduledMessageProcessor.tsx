@@ -5,15 +5,60 @@
  * Runs only for authenticated users and handles Firestore permission errors silently.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { processScheduledMessages } from '../services/scheduledMessageService';
 import { sendMessage } from '../services/chatService';
 
+// Check interval in milliseconds (30 seconds for better responsiveness)
+const CHECK_INTERVAL_MS = 30000;
+
 export default function ScheduledMessageProcessor() {
     const { userProfile, loading: authLoading } = useAuth();
     const processingRef = useRef(false);
-    const [hasInitialized, setHasInitialized] = useState(false);
+    const intervalRef = useRef<NodeJS.Timeout | null>(null);
+
+    const processMessages = useCallback(async () => {
+        // Only run for authenticated users
+        if (!userProfile?.uid) return;
+
+        // Prevent concurrent processing
+        if (processingRef.current) return;
+        processingRef.current = true;
+
+        try {
+            const sentCount = await processScheduledMessages(
+                async (chatId, senderId, content) => {
+                    // Only process messages from the current user
+                    if (senderId !== userProfile.uid) {
+                        console.warn('[Scheduler] Skipping message from different user');
+                        return;
+                    }
+                    await sendMessage(chatId, senderId, content);
+                }
+            );
+
+            if (sentCount > 0) {
+                console.log(`[Scheduler] Sent ${sentCount} scheduled message(s)`);
+            }
+        } catch (error) {
+            // Handle Firestore permission errors silently
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            if (errorMessage.includes('permission') ||
+                errorMessage.includes('PERMISSION_DENIED') ||
+                errorMessage.includes('Missing or insufficient permissions')) {
+                console.warn('[Scheduler] Firestore permission issue, skipping scheduled messages check');
+            } else if (errorMessage.includes('index')) {
+                console.warn('[Scheduler] Missing Firestore index, skipping scheduled messages check');
+            } else {
+                // Only log non-permission errors
+                console.warn('[Scheduler] Could not process scheduled messages:', errorMessage);
+            }
+        } finally {
+            processingRef.current = false;
+        }
+    }, [userProfile?.uid]);
 
     useEffect(() => {
         // Wait for auth to be fully loaded
@@ -24,60 +69,35 @@ export default function ScheduledMessageProcessor() {
             return;
         }
 
-        // Prevent running on every re-render
-        if (hasInitialized) return;
-        setHasInitialized(true);
+        // Process on mount after small delay
+        const initialTimeout = setTimeout(processMessages, 3000);
 
-        const processMessages = async () => {
-            // Prevent concurrent processing
-            if (processingRef.current) return;
-            processingRef.current = true;
+        // Set up regular interval (every 30 seconds)
+        intervalRef.current = setInterval(processMessages, CHECK_INTERVAL_MS);
 
-            try {
-                const sentCount = await processScheduledMessages(
-                    async (chatId, senderId, content) => {
-                        // Only process messages from the current user
-                        if (senderId !== userProfile.uid) {
-                            console.warn('[Scheduler] Skipping message from different user');
-                            return;
-                        }
-                        await sendMessage(chatId, senderId, content);
-                    }
-                );
-
-                if (sentCount > 0) {
-                    console.log(`[Scheduler] Sent ${sentCount} scheduled message(s)`);
-                }
-            } catch (error) {
-                // Handle Firestore permission errors silently
-                const errorMessage = error instanceof Error ? error.message : String(error);
-
-                if (errorMessage.includes('permission') ||
-                    errorMessage.includes('PERMISSION_DENIED') ||
-                    errorMessage.includes('Missing or insufficient permissions')) {
-                    console.warn('[Scheduler] Firestore permission issue, skipping scheduled messages check');
-                } else if (errorMessage.includes('index')) {
-                    console.warn('[Scheduler] Missing Firestore index, skipping scheduled messages check');
-                } else {
-                    // Only log non-permission errors
-                    console.warn('[Scheduler] Could not process scheduled messages:', errorMessage);
-                }
-            } finally {
-                processingRef.current = false;
+        // Process when tab becomes visible
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                processMessages();
             }
         };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
-        // Delay initial processing to avoid blocking app load
-        const initialTimeout = setTimeout(processMessages, 5000);
-
-        // Check every 60 seconds
-        const interval = setInterval(processMessages, 60000);
+        // Process on focus (when window gains focus)
+        const handleFocus = () => {
+            processMessages();
+        };
+        window.addEventListener('focus', handleFocus);
 
         return () => {
             clearTimeout(initialTimeout);
-            clearInterval(interval);
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('focus', handleFocus);
         };
-    }, [userProfile?.uid, authLoading, hasInitialized]);
+    }, [userProfile?.uid, authLoading, processMessages]);
 
     // This component renders nothing
     return null;

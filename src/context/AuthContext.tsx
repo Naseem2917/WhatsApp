@@ -7,10 +7,13 @@ import {
     onAuthStateChanged,
     updateProfile,
     GoogleAuthProvider,
-    signInWithPopup
+    signInWithPopup,
+    signInWithPhoneNumber,
+    RecaptchaVerifier,
+    ConfirmationResult
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
-import { getUserById, updateOnlineStatus, getUserByEmail } from '../services/userService';
+import { getUserById, updateOnlineStatus, getUserByEmail, getUserByPhone } from '../services/userService';
 import type { UserProfile } from '../types';
 
 interface AuthContextType {
@@ -21,6 +24,8 @@ interface AuthContextType {
     login: (email: string, password: string) => Promise<void>;
     signup: (email: string, password: string, displayName: string) => Promise<User>;
     loginWithGoogle: () => Promise<{ isNewUser: boolean }>;
+    loginWithPhone: (phoneNumber: string) => Promise<void>;
+    verifyOTP: (otp: string) => Promise<{ isNewUser: boolean }>;
     logout: () => Promise<void>;
     clearError: () => void;
     refreshUserProfile: () => Promise<void>;
@@ -36,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
     // Fetch user profile from Firestore
     const fetchUserProfile = useCallback(async (uid: string) => {
@@ -137,6 +143,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
+    // Phone Sign-in function - Step 1: Send OTP
+    const loginWithPhone = async (phoneNumber: string): Promise<void> => {
+        try {
+            setError(null);
+            setLoading(true);
+
+            // Clear any existing reCAPTCHA
+            const recaptchaContainer = document.getElementById('recaptcha-container');
+            if (recaptchaContainer) {
+                recaptchaContainer.innerHTML = '';
+            }
+
+            // Create new reCAPTCHA verifier
+            const recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+                size: 'invisible',
+                callback: () => {
+                    console.log('reCAPTCHA verified');
+                },
+                'expired-callback': () => {
+                    setError('reCAPTCHA expired. Please try again.');
+                }
+            });
+
+            // Render the reCAPTCHA
+            await recaptchaVerifier.render();
+
+            const confirmation = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+            setConfirmationResult(confirmation);
+        } catch (err) {
+            console.error('Phone auth error:', err);
+            const errorMessage = getAuthErrorMessage(err);
+            setError(errorMessage);
+            throw new Error(errorMessage);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Phone Sign-in function - Step 2: Verify OTP
+    const verifyOTP = async (otp: string): Promise<{ isNewUser: boolean }> => {
+        try {
+            setError(null);
+            setLoading(true);
+
+            if (!confirmationResult) {
+                throw new Error('Please request OTP first');
+            }
+
+            const result = await confirmationResult.confirm(otp);
+
+            // Check if user already exists in Firestore by phone
+            const existingProfile = await getUserByPhone(result.user.phoneNumber || '');
+
+            if (existingProfile) {
+                // Existing user - load their profile
+                setUserProfile(existingProfile);
+                return { isNewUser: false };
+            } else {
+                // New user - needs onboarding
+                return { isNewUser: true };
+            }
+        } catch (err) {
+            const errorMessage = getAuthErrorMessage(err);
+            setError(errorMessage);
+            throw new Error(errorMessage);
+        } finally {
+            setLoading(false);
+            setConfirmationResult(null);
+        }
+    };
+
     // Signup function
     const signup = async (email: string, password: string, displayName: string) => {
         try {
@@ -182,6 +259,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         signup,
         loginWithGoogle,
+        loginWithPhone,
+        verifyOTP,
         logout,
         clearError,
         refreshUserProfile,

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Sidebar } from '../components/layout';
+import { DropdownMenu } from '../components/common';
 import {
     getChatById,
     subscribeToChatMessages,
@@ -12,6 +13,7 @@ import {
     makeGroupAdmin,
     removeGroupMember
 } from '../services/chatService';
+import { uploadFile, validateFile } from '../services/fileService';
 import { getUserById } from '../services/userService';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import AIFeaturesPanel from '../components/chat/AIFeaturesPanel';
@@ -21,6 +23,7 @@ import TripPlannerModal from '../components/chat/TripPlannerModal';
 import TripPlannerFormModal from '../components/chat/TripPlannerFormModal';
 import SmartRepliesPanel from '../components/chat/SmartRepliesPanel';
 import GroupInfoPanel from '../components/chat/GroupInfoPanel';
+import UserProfilePanel from '../components/chat/UserProfilePanel';
 import type { Chat, Message, UserProfile } from '../types';
 
 export default function ChatPage() {
@@ -52,9 +55,13 @@ export default function ChatPage() {
     const [showGroupInfo, setShowGroupInfo] = useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [showTripForm, setShowTripForm] = useState(false);
+    const [showChatMenu, setShowChatMenu] = useState(false);
+    const [showUserProfile, setShowUserProfile] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     const scrollToBottom = useCallback(() => {
@@ -339,11 +346,43 @@ export default function ChatPage() {
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                         </button>
-                        <button className="icon-btn">
-                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
-                            </svg>
-                        </button>
+                        <div className="relative">
+                            <button
+                                className="icon-btn"
+                                onClick={() => setShowChatMenu(!showChatMenu)}
+                            >
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 7a2 2 0 1 0-.001-4.001A2 2 0 0 0 12 7zm0 2a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 9zm0 6a2 2 0 1 0-.001 3.999A2 2 0 0 0 12 15z" />
+                                </svg>
+                            </button>
+                            <DropdownMenu
+                                isOpen={showChatMenu}
+                                onClose={() => setShowChatMenu(false)}
+                                items={[
+                                    {
+                                        label: chat?.isGroup ? 'Group Info' : 'View Contact',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+                                        onClick: () => chat?.isGroup ? setShowGroupInfo(true) : setShowUserProfile(true)
+                                    },
+                                    {
+                                        label: 'Search in Chat',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>,
+                                        onClick: () => { /* TODO: Implement search */ }
+                                    },
+                                    {
+                                        label: 'Mute Notifications',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>,
+                                        onClick: () => { /* TODO: Implement mute */ }
+                                    },
+                                    {
+                                        label: 'Clear Chat',
+                                        icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+                                        onClick: () => { /* TODO: Implement clear */ },
+                                        danger: true
+                                    }
+                                ]}
+                            />
+                        </div>
                     </div>
                 </header>
 
@@ -367,44 +406,85 @@ export default function ChatPage() {
                                 {group.messages.map((message) => {
                                     const isOwn = message.senderId === userProfile?.uid;
                                     const isImportant = importantMessageIds.includes(message.id);
+                                    const hasReactions = message.reactions && Object.keys(message.reactions).length > 0;
                                     return (
                                         <div key={message.id} className={`flex mb-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                            <div
-                                                className={`${isOwn ? 'message-out' : 'message-in'} ${isImportant ? 'ring-2 ring-yellow-500' : ''}`}
-                                            >
-                                                {isImportant && (
-                                                    <div className="flex items-center gap-1 mb-1 text-yellow-500 text-xs">
-                                                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
-                                                        </svg>
-                                                        Important
+                                            <div className="relative group">
+                                                {/* Quick reaction picker - shows on hover */}
+                                                <div
+                                                    className={`absolute ${isOwn ? 'right-0' : 'left-0'} -top-8 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 p-1 rounded-full shadow-lg z-10`}
+                                                    style={{ backgroundColor: 'var(--wa-bg-panel)', border: '1px solid var(--wa-border)' }}
+                                                >
+                                                    {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
+                                                        <button
+                                                            key={emoji}
+                                                            onClick={async () => {
+                                                                if (chatId && userProfile?.uid) {
+                                                                    const { toggleMessageReaction } = await import('../services/chatService');
+                                                                    await toggleMessageReaction(chatId, message.id, userProfile.uid, emoji);
+                                                                }
+                                                            }}
+                                                            className="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-base"
+                                                        >
+                                                            {emoji}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div
+                                                    className={`${isOwn ? 'message-out' : 'message-in'} ${isImportant ? 'ring-2 ring-yellow-500' : ''}`}
+                                                >
+                                                    {isImportant && (
+                                                        <div className="flex items-center gap-1 mb-1 text-yellow-500 text-xs">
+                                                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                                                                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                                                            </svg>
+                                                            Important
+                                                        </div>
+                                                    )}
+                                                    {/* Sender name for group chats */}
+                                                    {chat?.isGroup && !isOwn && (
+                                                        <p className="text-xs font-semibold mb-1" style={{ color: 'var(--wa-green)' }}>
+                                                            {groupMemberProfiles.get(message.senderId)?.displayName || 'Unknown'}
+                                                        </p>
+                                                    )}
+                                                    <p className="break-words">{message.content}</p>
+                                                    <div className={`flex items-center gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                                                        <span className="text-xs" style={{ color: 'var(--wa-text-light)' }}>
+                                                            {formatTime(message.timestamp)}
+                                                        </span>
+                                                        {isOwn && (
+                                                            <span style={{ color: message.status === 'read' ? '#53bdeb' : 'var(--wa-text-light)' }}>
+                                                                {message.status === 'read' || message.status === 'delivered' ? (
+                                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                                        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
+                                                                    </svg>
+                                                                ) : (
+                                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                                                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
+                                                                    </svg>
+                                                                )}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* Display reactions */}
+                                                {hasReactions && (
+                                                    <div
+                                                        className={`flex gap-1 mt-0.5 ${isOwn ? 'justify-end' : 'justify-start'}`}
+                                                    >
+                                                        {Object.entries(message.reactions || {}).map(([emoji, users]) => (
+                                                            <span
+                                                                key={emoji}
+                                                                className="px-1.5 py-0.5 rounded-full text-xs flex items-center gap-0.5"
+                                                                style={{ backgroundColor: 'var(--wa-bg-panel)', border: '1px solid var(--wa-border)' }}
+                                                            >
+                                                                {emoji} {users.length > 1 && users.length}
+                                                            </span>
+                                                        ))}
                                                     </div>
                                                 )}
-                                                {/* Sender name for group chats */}
-                                                {chat?.isGroup && !isOwn && (
-                                                    <p className="text-xs font-semibold mb-1" style={{ color: 'var(--wa-green)' }}>
-                                                        {groupMemberProfiles.get(message.senderId)?.displayName || 'Unknown'}
-                                                    </p>
-                                                )}
-                                                <p className="break-words">{message.content}</p>
-                                                <div className={`flex items-center gap-1 mt-1 ${isOwn ? 'justify-end' : 'justify-start'}`}>
-                                                    <span className="text-xs" style={{ color: 'var(--wa-text-light)' }}>
-                                                        {formatTime(message.timestamp)}
-                                                    </span>
-                                                    {isOwn && (
-                                                        <span style={{ color: message.status === 'read' ? '#53bdeb' : 'var(--wa-text-light)' }}>
-                                                            {message.status === 'read' || message.status === 'delivered' ? (
-                                                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                                                    <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z" />
-                                                                </svg>
-                                                            ) : (
-                                                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                                                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
-                                                                </svg>
-                                                            )}
-                                                        </span>
-                                                    )}
-                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -459,10 +539,56 @@ export default function ChatPage() {
                         </button>
 
                         {/* Attachment */}
-                        <button type="button" className="icon-btn">
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                            </svg>
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept="image/*,application/pdf,.doc,.docx,.txt"
+                            className="hidden"
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file || !chatId || !userProfile) return;
+
+                                const validationError = validateFile(file);
+                                if (validationError) {
+                                    alert(validationError.message);
+                                    return;
+                                }
+
+                                setIsUploading(true);
+                                try {
+                                    const result = await uploadFile(file, chatId, userProfile.uid);
+                                    await sendMessage(
+                                        chatId,
+                                        userProfile.uid,
+                                        result.fileType === 'image' ? '📷 Photo' : `📎 ${result.fileName}`,
+                                        result.fileType,
+                                        result.url,
+                                        result.fileName,
+                                        result.fileSize
+                                    );
+                                } catch (err) {
+                                    console.error('Upload failed:', err);
+                                    alert(err instanceof Error ? err.message : 'Upload failed');
+                                } finally {
+                                    setIsUploading(false);
+                                    e.target.value = '';
+                                }
+                            }}
+                        />
+                        <button
+                            type="button"
+                            className="icon-btn"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                            title="Attach file (max 5MB)"
+                        >
+                            {isUploading ? (
+                                <div className="spinner w-6 h-6" />
+                            ) : (
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                            )}
                         </button>
 
                         {/* Input */}
@@ -480,14 +606,14 @@ export default function ChatPage() {
                         <button
                             type="submit"
                             disabled={!newMessage.trim() || isSending}
-                            className="p-2 rounded-full transition-colors disabled:opacity-50"
-                            style={{ backgroundColor: 'var(--wa-green)', color: '#ffffff' }}
+                            className="w-12 h-12 rounded-full flex items-center justify-center transition-all disabled:opacity-50 hover:opacity-90 active:scale-95"
+                            style={{ backgroundColor: 'var(--wa-green)' }}
                         >
                             {isSending ? (
-                                <div className="spinner w-6 h-6" />
+                                <div className="spinner w-5 h-5" />
                             ) : (
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
                                 </svg>
                             )}
                         </button>
@@ -579,6 +705,13 @@ export default function ChatPage() {
                     setTripPlan(plan);
                     setShowTripModal(true);
                 }}
+            />
+
+            {/* User Profile Panel */}
+            <UserProfilePanel
+                user={otherUser}
+                isOpen={showUserProfile}
+                onClose={() => setShowUserProfile(false)}
             />
         </div>
     );

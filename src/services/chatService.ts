@@ -136,11 +136,14 @@ export async function sendMessage(
     chatId: string,
     senderId: string,
     content: string,
-    type: 'text' | 'image' | 'file' = 'text'
+    type: 'text' | 'image' | 'file' = 'text',
+    fileUrl?: string,
+    fileName?: string,
+    fileSize?: number
 ): Promise<string> {
     const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
 
-    const messageData = {
+    const messageData: Record<string, unknown> = {
         chatId,
         senderId,
         content,
@@ -148,6 +151,11 @@ export async function sendMessage(
         status: 'sent',
         timestamp: serverTimestamp(),
     };
+
+    // Add file fields if present
+    if (fileUrl) messageData.fileUrl = fileUrl;
+    if (fileName) messageData.fileName = fileName;
+    if (fileSize !== undefined) messageData.fileSize = fileSize;
 
     const newMessageRef = await addDoc(messagesRef, messageData);
 
@@ -426,4 +434,46 @@ export async function leaveGroup(
     userId: string
 ): Promise<void> {
     await removeGroupMember(chatId, userId);
+}
+
+/**
+ * Toggle a reaction on a message
+ */
+export async function toggleMessageReaction(
+    chatId: string,
+    messageId: string,
+    userId: string,
+    emoji: string
+): Promise<void> {
+    const messageRef = doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, messageId);
+    const messageDoc = await getDoc(messageRef);
+
+    if (!messageDoc.exists()) {
+        throw new Error('Message not found');
+    }
+
+    const currentReactions = messageDoc.data().reactions || {};
+    const usersWithReaction = currentReactions[emoji] || [];
+
+    let newReactions: Record<string, string[]>;
+
+    if (usersWithReaction.includes(userId)) {
+        // Remove reaction
+        const filtered = usersWithReaction.filter((id: string) => id !== userId);
+        if (filtered.length === 0) {
+            // Remove the emoji key entirely if no users left
+            const { [emoji]: _removed, ...rest } = currentReactions;
+            newReactions = rest;
+        } else {
+            newReactions = { ...currentReactions, [emoji]: filtered };
+        }
+    } else {
+        // Add reaction
+        newReactions = {
+            ...currentReactions,
+            [emoji]: [...usersWithReaction, userId]
+        };
+    }
+
+    await updateDoc(messageRef, { reactions: newReactions });
 }

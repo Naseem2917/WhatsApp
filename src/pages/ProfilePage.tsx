@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { updateUserProfile, isUsernameUnique, isPhoneUnique } from '../services/userService';
 import { Header } from '../components/layout';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { storage } from '../config/firebase';
 
 export default function ProfilePage() {
     const { userProfile, refreshUserProfile } = useAuth();
@@ -10,6 +12,9 @@ export default function ProfilePage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+    const photoInputRef = useRef<HTMLInputElement>(null);
 
     // Form state
     const [displayName, setDisplayName] = useState('');
@@ -120,14 +125,60 @@ export default function ProfilePage() {
                         <div className="flex items-center gap-4">
                             {/* Avatar */}
                             <div className="relative">
-                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-2xl sm:text-3xl font-bold shadow-glow">
-                                    {userProfile?.displayName?.charAt(0).toUpperCase() || 'U'}
+                                <input
+                                    ref={photoInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file || !userProfile) return;
+
+                                        if (file.size > 5 * 1024 * 1024) {
+                                            setError('Image must be less than 5MB');
+                                            return;
+                                        }
+
+                                        setUploadingPhoto(true);
+                                        setError(null);
+                                        try {
+                                            const timestamp = Date.now();
+                                            const filePath = `profile-photos/${userProfile.uid}/${timestamp}_${file.name}`;
+                                            const storageRef = ref(storage, filePath);
+                                            await uploadBytes(storageRef, file);
+                                            const photoURL = await getDownloadURL(storageRef);
+
+                                            await updateUserProfile(userProfile.uid, { photoURL });
+                                            await refreshUserProfile();
+                                            setSuccess('Profile photo updated!');
+                                        } catch (err) {
+                                            setError(err instanceof Error ? err.message : 'Failed to upload photo');
+                                        } finally {
+                                            setUploadingPhoto(false);
+                                            e.target.value = '';
+                                        }
+                                    }}
+                                />
+                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-2xl sm:text-3xl font-bold shadow-glow overflow-hidden">
+                                    {userProfile?.photoURL ? (
+                                        <img src={userProfile.photoURL} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                        userProfile?.displayName?.charAt(0).toUpperCase() || 'U'
+                                    )}
                                 </div>
-                                <button className="absolute bottom-0 right-0 w-8 h-8 bg-primary-500 rounded-full flex items-center justify-center text-white hover:bg-primary-600 transition-colors shadow-lg">
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                                    </svg>
+                                <button
+                                    onClick={() => photoInputRef.current?.click()}
+                                    disabled={uploadingPhoto}
+                                    className="absolute bottom-0 right-0 w-8 h-8 bg-primary-500 rounded-full flex items-center justify-center text-white hover:bg-primary-600 transition-colors shadow-lg disabled:opacity-50"
+                                >
+                                    {uploadingPhoto ? (
+                                        <div className="spinner w-4 h-4" />
+                                    ) : (
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                        </svg>
+                                    )}
                                 </button>
                             </div>
 
