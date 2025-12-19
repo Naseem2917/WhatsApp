@@ -53,3 +53,15 @@ export interface SearchResult {
     photoURL: string | null;
     email?: string;
 }
+
+// Scheduled message interface
+export interface ScheduledMessage {
+    id: string;
+    chatId: string;
+    senderId: string;
+    content: string;
+    scheduledFor: Date;
+    status: 'pending' | 'sent' | 'cancelled';
+    createdAt: Date;
+    recipientName?: string;
+}

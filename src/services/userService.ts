@@ -165,24 +165,42 @@ export async function updateOnlineStatus(uid: string, isOnline: boolean): Promis
 }
 
 /**
- * Search users by email, username, or phone
+ * Search users by email, username, or phone with prefix matching
  */
 export async function searchUsers(
     searchTerm: string,
     searchType: 'email' | 'username' | 'phone'
 ): Promise<UserProfile[]> {
     const usersRef = collection(db, USERS_COLLECTION);
+    const searchLower = searchTerm.toLowerCase();
+    const searchEnd = searchLower + '\uf8ff'; // Unicode high character for range query
+
     let q;
 
     switch (searchType) {
         case 'email':
-            q = query(usersRef, where('email', '==', searchTerm.toLowerCase()));
+            // Prefix search for email
+            q = query(
+                usersRef,
+                where('email', '>=', searchLower),
+                where('email', '<=', searchEnd)
+            );
             break;
         case 'username':
-            q = query(usersRef, where('username', '==', searchTerm.toLowerCase()));
+            // Prefix search for username
+            q = query(
+                usersRef,
+                where('username', '>=', searchLower),
+                where('username', '<=', searchEnd)
+            );
             break;
         case 'phone':
-            q = query(usersRef, where('phoneNumber', '==', searchTerm));
+            // Prefix search for phone
+            q = query(
+                usersRef,
+                where('phoneNumber', '>=', searchTerm),
+                where('phoneNumber', '<=', searchTerm + '\uf8ff')
+            );
             break;
     }
 
@@ -195,4 +213,37 @@ export async function searchUsers(
             lastSeen: (data.lastSeen as Timestamp)?.toDate() || new Date(),
         } as UserProfile;
     });
+}
+
+/**
+ * Search all users with general search term - uses client-side filtering for reliability
+ */
+export async function searchAllUsers(searchTerm: string): Promise<UserProfile[]> {
+    if (!searchTerm || searchTerm.length < 2) return [];
+
+    try {
+        const searchLower = searchTerm.toLowerCase();
+        const usersRef = collection(db, USERS_COLLECTION);
+
+        // Fetch all users and filter client-side
+        const querySnapshot = await getDocs(usersRef);
+        const allUsers = querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                ...data,
+                createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
+                lastSeen: (data.lastSeen as Timestamp)?.toDate() || new Date(),
+            } as UserProfile;
+        });
+
+        // Filter by username, email, or displayName
+        return allUsers.filter(user =>
+            user.username?.toLowerCase().includes(searchLower) ||
+            user.email?.toLowerCase().includes(searchLower) ||
+            user.displayName?.toLowerCase().includes(searchLower)
+        );
+    } catch (error) {
+        console.error('Search error:', error);
+        return [];
+    }
 }

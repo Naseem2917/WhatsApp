@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { scheduleMessage } from '../../services/aiService';
+import { createScheduledMessage } from '../../services/scheduledMessageService';
 
 interface ScheduleMessageModalProps {
     isOpen: boolean;
     onClose: () => void;
+    chatId?: string;
+    senderId?: string;
     recipientName?: string;
     onScheduleSuccess?: (scheduledTime: Date, content: string) => void;
 }
@@ -11,6 +14,8 @@ interface ScheduleMessageModalProps {
 export default function ScheduleMessageModal({
     isOpen,
     onClose,
+    chatId,
+    senderId,
     recipientName,
     onScheduleSuccess,
 }: ScheduleMessageModalProps) {
@@ -51,6 +56,18 @@ export default function ScheduleMessageModal({
 
         try {
             const result = await scheduleMessage(messageContent.trim(), dateTime, recipientName);
+
+            // Save to Firestore for persistence (Firebase Functions will send it)
+            if (chatId && senderId) {
+                await createScheduledMessage(
+                    chatId,
+                    senderId,
+                    messageContent.trim(),
+                    dateTime,
+                    recipientName
+                );
+            }
+
             setSuccess(result.message);
             onScheduleSuccess?.(dateTime, messageContent.trim());
 
