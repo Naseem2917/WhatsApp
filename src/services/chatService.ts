@@ -1,6 +1,5 @@
 import {
     doc,
-    setDoc,
     getDoc,
     getDocs,
     query,
@@ -228,4 +227,203 @@ export async function updateMessageStatus(
 ): Promise<void> {
     const messageRef = doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, messageId);
     await updateDoc(messageRef, { status });
+}
+
+/**
+ * Mark all messages as read for a user in a chat
+ */
+export async function markMessagesAsRead(
+    chatId: string,
+    currentUserId: string
+): Promise<void> {
+    const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
+    const q = query(
+        messagesRef,
+        where('senderId', '!=', currentUserId),
+        where('status', 'in', ['sent', 'delivered'])
+    );
+
+    try {
+        const querySnapshot = await getDocs(q);
+        const updatePromises = querySnapshot.docs.map((msgDoc) =>
+            updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
+                status: 'read'
+            })
+        );
+        await Promise.all(updatePromises);
+    } catch (error) {
+        console.error('Error marking messages as read:', error);
+    }
+}
+
+/**
+ * Set typing status for a user in a chat
+ */
+export async function setTypingStatus(
+    chatId: string,
+    userId: string,
+    isTyping: boolean
+): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    const typingField = `typing.${userId}`;
+
+    await updateDoc(chatRef, {
+        [typingField]: isTyping ? serverTimestamp() : null
+    });
+}
+
+/**
+ * Subscribe to typing status in a chat
+ */
+export function subscribeToTypingStatus(
+    chatId: string,
+    currentUserId: string,
+    callback: (typingUsers: string[]) => void
+): () => void {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+
+    const unsubscribe = onSnapshot(chatRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.data();
+            const typing = data.typing || {};
+            const now = Date.now();
+
+            // Filter out users who stopped typing (more than 5 seconds ago)
+            const typingUsers = Object.entries(typing)
+                .filter(([id, timestamp]) => {
+                    if (id === currentUserId) return false;
+                    if (!timestamp) return false;
+                    const ts = (timestamp as Timestamp).toDate().getTime();
+                    return now - ts < 5000; // 5 second timeout
+                })
+                .map(([id]) => id);
+
+            callback(typingUsers);
+        }
+    });
+
+    return unsubscribe;
+}
+
+/**
+ * Group chat functions
+ */
+
+/**
+ * Create a new group chat
+ */
+export async function createGroupChat(
+    creatorId: string,
+    memberIds: string[],
+    groupName: string,
+    groupPhoto?: string
+): Promise<string> {
+    const chatsRef = collection(db, CHATS_COLLECTION);
+
+    const allParticipants = [creatorId, ...memberIds.filter(id => id !== creatorId)];
+
+    const newGroupRef = await addDoc(chatsRef, {
+        participants: allParticipants,
+        isGroup: true,
+        groupName,
+        groupPhoto: groupPhoto || null,
+        admins: [creatorId],
+        lastMessage: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+    });
+
+    return newGroupRef.id;
+}
+
+/**
+ * Add members to a group
+ */
+export async function addGroupMembers(
+    chatId: string,
+    memberIds: string[]
+): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    const chatSnap = await getDoc(chatRef);
+
+    if (chatSnap.exists()) {
+        const currentParticipants = chatSnap.data().participants || [];
+        const newParticipants = [...new Set([...currentParticipants, ...memberIds])];
+
+        await updateDoc(chatRef, {
+            participants: newParticipants,
+            updatedAt: serverTimestamp()
+        });
+    }
+}
+
+/**
+ * Remove a member from a group
+ */
+export async function removeGroupMember(
+    chatId: string,
+    memberId: string
+): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    const chatSnap = await getDoc(chatRef);
+
+    if (chatSnap.exists()) {
+        const currentParticipants = chatSnap.data().participants || [];
+        const newParticipants = currentParticipants.filter((id: string) => id !== memberId);
+
+        // Also remove from admins if they were an admin
+        const currentAdmins = chatSnap.data().admins || [];
+        const newAdmins = currentAdmins.filter((id: string) => id !== memberId);
+
+        await updateDoc(chatRef, {
+            participants: newParticipants,
+            admins: newAdmins,
+            updatedAt: serverTimestamp()
+        });
+    }
+}
+
+/**
+ * Update group info
+ */
+export async function updateGroupInfo(
+    chatId: string,
+    updates: { groupName?: string; groupPhoto?: string }
+): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    await updateDoc(chatRef, {
+        ...updates,
+        updatedAt: serverTimestamp()
+    });
+}
+
+/**
+ * Make a member an admin
+ */
+export async function makeGroupAdmin(
+    chatId: string,
+    memberId: string
+): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    const chatSnap = await getDoc(chatRef);
+
+    if (chatSnap.exists()) {
+        const currentAdmins = chatSnap.data().admins || [];
+        if (!currentAdmins.includes(memberId)) {
+            await updateDoc(chatRef, {
+                admins: [...currentAdmins, memberId],
+                updatedAt: serverTimestamp()
+            });
+        }
+    }
+}
+
+/**
+ * Leave a group
+ */
+export async function leaveGroup(
+    chatId: string,
+    userId: string
+): Promise<void> {
+    await removeGroupMember(chatId, userId);
 }
