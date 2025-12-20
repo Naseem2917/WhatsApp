@@ -286,7 +286,7 @@ export default function AIFeaturesPanel({
                 backgroundColor: 'var(--wa-bg-hover)',
                 color: 'var(--wa-text-light)'
             }}>
-                Powered by Google Gemini AI
+                <span style={{ color: 'var(--wa-green)' }}>⚡</span> AI features run only on request • Powered by Gemini
             </div>
         </div>
     );

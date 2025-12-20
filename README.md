@@ -23,7 +23,7 @@ A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, an
 - **Message Status** - Sent ✓, Delivered ✓✓, Read (blue) ✓✓ indicators
 - **Typing Indicators** - See when someone is typing
 - **Message Search** - Search within conversations
-- **File Sharing** - Send images, PDFs, and documents (up to 5MB)
+- **File Sharing** - Send images and text files (up to 5MB, with image compression)
 
 ### 😀 Message Actions & Reactions
 - **Quick Reactions** - React with 👍 ❤️ 😂 😮 😢 🙏 emojis
@@ -51,12 +51,6 @@ A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, an
 - **Live Preview** - See rewritten message before applying
 - **One-Click Apply** - Replace your text with AI suggestion
 - Access via ✨ button next to message input
-
-#### 💡 AI Auto Chat Actions  
-- **Intent Detection** - AI analyzes incoming messages automatically
-- **Smart Suggestions** - Get suggested replies, reminders, and actions
-- **Suggestion Bar** - Accept or dismiss AI recommendations
-- **Detects**: Meetings, reminders, questions, plans
 
 #### 📝 AI Conversation Summary
 - **Quick Summaries** - Get AI-generated summary of long conversations
@@ -94,6 +88,19 @@ A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, an
 - **Message Timestamps** - Relative and absolute time display
 - **Image Preview** - View sent images in full size
 - **Error Handling** - Graceful error messages and fallbacks
+- **Call Button** - Coming soon placeholder for WebRTC calls
+
+### ⚠️ Limitations & Design Decisions
+
+> **Firebase Free Tier Constraints**
+
+- **Client-Side Scheduling** - Scheduled messages send when app is open (no Cloud Functions)
+- **File Types** - Images and .txt files only (to minimize storage costs)
+- **Phone Login** - Limited by Firebase SMS quota; email is primary auth
+- **AI Usage** - All AI features are manual-only to control Gemini API quota
+- **No Calling** - WebRTC calling planned for post-hackathon (complexity)
+
+> These limitations are documented transparently in the UI.
 
 ---
 

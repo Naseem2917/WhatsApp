@@ -7,6 +7,7 @@ export interface UserProfile {
     displayName: string;
     photoURL: string | null;
     defaultLocation: string | null;
+    about?: string; // User bio/status
     createdAt: Date;
     lastSeen: Date;
     isOnline: boolean;
@@ -45,6 +46,7 @@ export interface Chat {
     admins?: string[];
     unreadCount?: Record<string, number>; // userId -> unread count
     favorites?: string[]; // userIds who favorited this chat
+    lastReadMessageId?: Record<string, string>; // userId -> last read messageId
 }
 
 // Auth context state
@@ -74,4 +76,17 @@ export interface ScheduledMessage {
     status: 'pending' | 'sent' | 'cancelled';
     createdAt: Date;
     recipientName?: string;
+}
+
+// Reminder interface for message reminders
+export interface Reminder {
+    id: string;
+    userId: string;
+    chatId: string;
+    messageId: string;
+    messageContent: string;
+    reminderTime: Date;
+    status: 'pending' | 'triggered' | 'dismissed';
+    createdAt: Date;
+    chatName?: string;
 }

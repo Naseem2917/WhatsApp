@@ -8,14 +8,15 @@ import { storage } from '../config/firebase';
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
-// Allowed file types
+// Allowed file types - Free tier: Images and text files only
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-const ALLOWED_DOCUMENT_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+const ALLOWED_DOCUMENT_TYPES = ['text/plain']; // Only .txt files for free tier
 
 export interface FileUploadResult {
     url: string;
     fileName: string;
     fileSize: number;
+    originalSize: number; // Original size before compression
     fileType: 'image' | 'file';
 }
 
@@ -43,7 +44,7 @@ export function validateFile(file: File): FileValidationError | null {
     if (!isImage && !isDocument) {
         return {
             type: 'type',
-            message: 'Unsupported file type. Please upload images (JPEG, PNG, GIF, WebP) or documents (PDF, DOC, TXT).'
+            message: 'Unsupported file type. Supports images (JPEG, PNG, GIF, WebP) and text files (.txt) only.'
         };
     }
 
@@ -146,6 +147,7 @@ export async function uploadFile(
         url,
         fileName: file.name,
         fileSize: processedFile.size,
+        originalSize: file.size,
         fileType
     };
 }

@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { UserProfile, Chat } from '../../types';
+import { compressImageToBase64, validateImageFile, formatBytes } from '../../utils/imageUtils';
+import { updateGroupInfo } from '../../services/chatService';
 
 interface GroupInfoPanelProps {
     chat: Chat;
@@ -8,6 +10,7 @@ interface GroupInfoPanelProps {
     onClose: () => void;
     onMakeAdmin?: (userId: string) => void;
     onRemoveMember?: (userId: string) => void;
+    onGroupUpdated?: () => void; // Callback after photo update
 }
 
 export default function GroupInfoPanel({
@@ -17,8 +20,13 @@ export default function GroupInfoPanel({
     onClose,
     onMakeAdmin,
     onRemoveMember,
+    onGroupUpdated,
 }: GroupInfoPanelProps) {
     const [showActions, setShowActions] = useState<string | null>(null);
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const photoInputRef = useRef<HTMLInputElement>(null);
     const isCurrentUserAdmin = chat.admins?.includes(currentUserId);
 
     return (
@@ -30,17 +38,69 @@ export default function GroupInfoPanel({
                 {/* Header */}
                 <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--wa-border)' }}>
                     <div className="flex items-center gap-3">
-                        {/* Group Avatar */}
+                        {/* Group Avatar - Clickable for admins */}
+                        <input
+                            ref={photoInputRef}
+                            type="file"
+                            accept="image/jpeg,image/png,image/gif,image/webp"
+                            className="hidden"
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                e.target.value = '';
+
+                                const validation = validateImageFile(file);
+                                if (!validation.valid) {
+                                    setError(validation.error || 'Invalid file');
+                                    return;
+                                }
+
+                                setUploadingPhoto(true);
+                                setError(null);
+                                setCompressionInfo(null);
+
+                                try {
+                                    // Compress image to Base64 for Firestore storage (FREE!)
+                                    const compressed = await compressImageToBase64(file);
+
+                                    if (compressed.wasCompressed) {
+                                        setCompressionInfo(`Compressed from ${formatBytes(compressed.originalSize)} to ${formatBytes(compressed.compressedSize)}`);
+                                        setTimeout(() => setCompressionInfo(null), 4000);
+                                    }
+
+                                    // Save Base64 directly to Firestore (no Firebase Storage needed!)
+                                    await updateGroupInfo(chat.id, { groupPhoto: compressed.base64 });
+                                    onGroupUpdated?.();
+                                } catch (err) {
+                                    console.error('Group photo upload error:', err);
+                                    setError(err instanceof Error ? err.message : 'Failed to upload photo');
+                                } finally {
+                                    setUploadingPhoto(false);
+                                }
+                            }}
+                        />
                         <div
-                            className="w-12 h-12 rounded-full flex items-center justify-center"
+                            className={`relative w-12 h-12 rounded-full flex items-center justify-center ${isCurrentUserAdmin ? 'cursor-pointer' : ''}`}
                             style={{ backgroundColor: 'var(--wa-green)' }}
+                            onClick={() => isCurrentUserAdmin && photoInputRef.current?.click()}
                         >
-                            {chat.groupPhoto ? (
+                            {uploadingPhoto ? (
+                                <div className="spinner w-6 h-6" />
+                            ) : chat.groupPhoto ? (
                                 <img src={chat.groupPhoto} alt={chat.groupName} className="w-full h-full rounded-full object-cover" />
                             ) : (
                                 <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M12 12.75c1.63 0 3.07.39 4.24.9 1.08.48 1.76 1.56 1.76 2.73V18H6v-1.61c0-1.18.68-2.26 1.76-2.73 1.17-.52 2.61-.91 4.24-.91zM4 13c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm1.13 1.1c-.37-.06-.74-.1-1.13-.1-.99 0-1.93.21-2.78.58A2.01 2.01 0 000 16.43V18h4.5v-1.61c0-.83.23-1.61.63-2.29zM20 13c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm4 3.43c0-.81-.48-1.53-1.22-1.85A6.95 6.95 0 0020 14c-.39 0-.76.04-1.13.1.4.68.63 1.46.63 2.29V18H24v-1.57zM12 6c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z" />
                                 </svg>
+                            )}
+                            {/* Camera overlay for admins */}
+                            {isCurrentUserAdmin && !uploadingPhoto && (
+                                <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity">
+                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                </div>
                             )}
                         </div>
                         <div>
@@ -58,6 +118,19 @@ export default function GroupInfoPanel({
                         </svg>
                     </button>
                 </div>
+
+                {/* Error/Compression Toast */}
+                {(error || compressionInfo) && (
+                    <div
+                        className="px-4 py-2 text-sm"
+                        style={{
+                            backgroundColor: error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)',
+                            color: error ? '#ef4444' : '#22c55e'
+                        }}
+                    >
+                        {error || compressionInfo}
+                    </div>
+                )}
 
                 {/* Members List */}
                 <div className="flex-1 overflow-y-auto p-2">

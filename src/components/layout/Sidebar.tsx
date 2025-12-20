@@ -134,7 +134,7 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
         <>
             <aside
                 className={`
-                    fixed inset-y-0 left-0 z-40 w-full sm:w-[420px] wa-panel
+                    fixed inset-y-0 left-0 z-40 w-full sm:w-[420px] wa-panel h-screen
                     transform transition-transform duration-300 ease-in-out
                     ${isOpen ? 'translate-x-0' : '-translate-x-full'}
                     sm:relative sm:translate-x-0 flex flex-col
@@ -249,7 +249,7 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                 </div>
 
                 {/* Filter tabs */}
-                <div className="px-3 py-2 flex gap-2" style={{ backgroundColor: 'var(--wa-bg-panel)' }}>
+                <div className="px-3 py-2 flex gap-2 items-center" style={{ backgroundColor: 'var(--wa-bg-panel)' }}>
                     {filters.map(({ key, label }) => (
                         <button
                             key={key}
@@ -259,6 +259,19 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                             {label}
                         </button>
                     ))}
+                    {/* Add person to favorites button */}
+                    {filter === 'favorites' && (
+                        <button
+                            onClick={() => setShowNewChatModal(true)}
+                            className="ml-auto w-7 h-7 rounded-full flex items-center justify-center hover:bg-black/10 transition-colors"
+                            style={{ color: 'var(--wa-green)' }}
+                            title="Add person to favorites"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                        </button>
+                    )}
                 </div>
 
                 {/* Chat list */}

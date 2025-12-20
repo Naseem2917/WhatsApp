@@ -160,16 +160,33 @@ export async function sendMessage(
 
     const newMessageRef = await addDoc(messagesRef, messageData);
 
-    // Update chat's last message and updatedAt
+    // Update chat's last message, updatedAt, and increment unread counts
     const chatRef = doc(db, CHATS_COLLECTION, chatId);
-    await updateDoc(chatRef, {
-        lastMessage: {
-            ...messageData,
-            id: newMessageRef.id,
-            timestamp: new Date(),
-        },
-        updatedAt: serverTimestamp(),
-    });
+    const chatSnap = await getDoc(chatRef);
+
+    if (chatSnap.exists()) {
+        const chatData = chatSnap.data();
+        const participants: string[] = chatData.participants || [];
+        const currentUnreadCount: Record<string, number> = chatData.unreadCount || {};
+
+        // Increment unread count for all participants except sender
+        const newUnreadCount: Record<string, number> = { ...currentUnreadCount };
+        participants.forEach(participantId => {
+            if (participantId !== senderId) {
+                newUnreadCount[participantId] = (newUnreadCount[participantId] || 0) + 1;
+            }
+        });
+
+        await updateDoc(chatRef, {
+            lastMessage: {
+                ...messageData,
+                id: newMessageRef.id,
+                timestamp: new Date(),
+            },
+            updatedAt: serverTimestamp(),
+            unreadCount: newUnreadCount,
+        });
+    }
 
     return newMessageRef.id;
 }
@@ -240,6 +257,7 @@ export async function updateMessageStatus(
 
 /**
  * Mark all messages as read for a user in a chat
+ * Also resets unread count and tracks lastReadMessageId
  */
 export async function markMessagesAsRead(
     chatId: string,
@@ -260,8 +278,59 @@ export async function markMessagesAsRead(
             })
         );
         await Promise.all(updatePromises);
+
+        // Get the last message ID to track read position
+        const lastMsgQuery = query(messagesRef, orderBy('timestamp', 'desc'), limit(1));
+        const lastMsgSnap = await getDocs(lastMsgQuery);
+        const lastMessageId = lastMsgSnap.docs[0]?.id || null;
+
+        // Always reset unread count and update lastReadMessageId for this user
+        const chatRef = doc(db, CHATS_COLLECTION, chatId);
+        await updateDoc(chatRef, {
+            [`unreadCount.${currentUserId}`]: 0,
+            [`lastReadMessageId.${currentUserId}`]: lastMessageId,
+        });
     } catch (error) {
         console.error('Error marking messages as read:', error);
+
+        // Even if message status update fails, still try to reset unread count
+        try {
+            const chatRef = doc(db, CHATS_COLLECTION, chatId);
+            await updateDoc(chatRef, {
+                [`unreadCount.${currentUserId}`]: 0,
+            });
+        } catch {
+            // Silently fail
+        }
+    }
+}
+
+/**
+ * Mark unread messages as delivered (double tick) when recipient comes online/opens app
+ * This happens before 'read' - when recipient device receives the message
+ */
+export async function markMessagesAsDelivered(
+    chatId: string,
+    currentUserId: string
+): Promise<void> {
+    const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
+    const q = query(
+        messagesRef,
+        where('senderId', '!=', currentUserId),
+        where('status', '==', 'sent')
+    );
+
+    try {
+        const querySnapshot = await getDocs(q);
+        const updatePromises = querySnapshot.docs.map((msgDoc) =>
+            updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
+                status: 'delivered'
+            })
+        );
+        await Promise.all(updatePromises);
+    } catch (error) {
+        // Silently fail - this is a non-critical operation
+        console.error('Error marking messages as delivered:', error);
     }
 }
 

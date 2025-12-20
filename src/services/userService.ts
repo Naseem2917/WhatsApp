@@ -23,7 +23,8 @@ export async function createUser(
     email: string,
     username: string,
     phoneNumber: string,
-    displayName: string
+    displayName: string,
+    photoURL?: string | null // Optional: import from Google or other provider
 ): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, uid);
 
@@ -33,7 +34,7 @@ export async function createUser(
         username: username.toLowerCase(),
         phoneNumber,
         displayName,
-        photoURL: null,
+        photoURL: photoURL || null, // Use provided photo or null
         defaultLocation: null,
         isOnline: true,
         onboardingComplete: true,

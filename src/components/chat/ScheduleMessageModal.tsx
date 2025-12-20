@@ -105,30 +105,37 @@ export default function ScheduleMessageModal({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                className="absolute inset-0 bg-black/50"
                 onClick={onClose}
             />
 
             {/* Modal */}
-            <div className="relative w-full max-w-md bg-dark-900 rounded-2xl shadow-xl border border-dark-700 animate-fade-in">
+            <div
+                className="relative w-full max-w-md rounded-lg shadow-xl overflow-hidden"
+                style={{ backgroundColor: 'var(--wa-bg-panel)', border: '1px solid var(--wa-border)' }}
+            >
                 {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-dark-700">
+                <div
+                    className="flex items-center justify-between p-4"
+                    style={{ backgroundColor: 'var(--wa-bg-deeper)', borderBottom: '1px solid var(--wa-border)' }}
+                >
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-red-500 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: 'var(--wa-green)' }}>
                             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
                         <div>
-                            <h2 className="text-lg font-semibold text-white">Schedule Message</h2>
+                            <h2 className="text-lg font-semibold" style={{ color: 'var(--wa-text-primary)' }}>Schedule Message</h2>
                             {recipientName && (
-                                <p className="text-dark-400 text-sm">To: {recipientName}</p>
+                                <p className="text-sm" style={{ color: 'var(--wa-text-secondary)' }}>To: {recipientName}</p>
                             )}
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-dark-400 hover:text-white hover:bg-dark-700 rounded-lg transition-colors"
+                        className="p-2 rounded-lg hover:bg-black/10 transition-colors"
+                        style={{ color: 'var(--wa-icon)' }}
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -138,14 +145,25 @@ export default function ScheduleMessageModal({
 
                 {/* Content */}
                 <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                    {/* Limitation Banner */}
+                    <div
+                        className="p-3 rounded-lg text-sm flex items-start gap-2"
+                        style={{ backgroundColor: 'var(--wa-green)', color: 'white' }}
+                    >
+                        <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>Background scheduling is limited due to free-tier constraints. Messages will send when app is open.</span>
+                    </div>
+
                     {error && (
-                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                             {error}
                         </div>
                     )}
 
                     {success && (
-                        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm flex items-center gap-2">
+                        <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-green-600 text-sm flex items-center gap-2">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
@@ -155,17 +173,22 @@ export default function ScheduleMessageModal({
 
                     {/* Message Input */}
                     <div>
-                        <label className="block text-dark-300 text-sm font-medium mb-2">
+                        <label className="block text-sm font-medium mb-2" style={{ color: 'var(--wa-text-secondary)' }}>
                             Message
                         </label>
                         <textarea
                             value={messageContent}
                             onChange={(e) => setMessageContent(e.target.value)}
                             placeholder="Type your message..."
-                            className="input-field min-h-[100px] resize-none"
+                            className="w-full rounded-lg py-3 px-4 min-h-[100px] resize-none focus:outline-none"
+                            style={{
+                                backgroundColor: 'var(--wa-bg-input)',
+                                color: 'var(--wa-text-primary)',
+                                border: '1px solid var(--wa-border)'
+                            }}
                             maxLength={500}
                         />
-                        <p className="text-dark-500 text-xs mt-1 text-right">
+                        <p className="text-xs mt-1 text-right" style={{ color: 'var(--wa-text-light)' }}>
                             {messageContent.length}/500
                         </p>
                     </div>
@@ -173,7 +196,7 @@ export default function ScheduleMessageModal({
                     {/* Date & Time */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-dark-300 text-sm font-medium mb-2">
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--wa-text-secondary)' }}>
                                 Date
                             </label>
                             <input
@@ -181,11 +204,16 @@ export default function ScheduleMessageModal({
                                 value={scheduledDate}
                                 onChange={(e) => setScheduledDate(e.target.value)}
                                 min={getMinDate()}
-                                className="input-field"
+                                className="w-full rounded-lg py-3 px-4 focus:outline-none"
+                                style={{
+                                    backgroundColor: 'var(--wa-bg-input)',
+                                    color: 'var(--wa-text-primary)',
+                                    border: '1px solid var(--wa-border)'
+                                }}
                             />
                         </div>
                         <div>
-                            <label className="block text-dark-300 text-sm font-medium mb-2">
+                            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--wa-text-secondary)' }}>
                                 Time
                             </label>
                             <input
@@ -193,7 +221,12 @@ export default function ScheduleMessageModal({
                                 value={scheduledTime}
                                 onChange={(e) => setScheduledTime(e.target.value)}
                                 min={getMinTime()}
-                                className="input-field"
+                                className="w-full rounded-lg py-3 px-4 focus:outline-none"
+                                style={{
+                                    backgroundColor: 'var(--wa-bg-input)',
+                                    color: 'var(--wa-text-primary)',
+                                    border: '1px solid var(--wa-border)'
+                                }}
                             />
                         </div>
                     </div>
@@ -202,11 +235,12 @@ export default function ScheduleMessageModal({
                     <button
                         type="submit"
                         disabled={isSubmitting || !messageContent.trim() || !scheduledDate || !scheduledTime}
-                        className="btn-primary w-full flex items-center justify-center gap-2"
+                        className="w-full py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                        style={{ backgroundColor: 'var(--wa-green)', color: 'white' }}
                     >
                         {isSubmitting ? (
                             <>
-                                <div className="spinner" />
+                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                 Scheduling...
                             </>
                         ) : (
@@ -219,7 +253,7 @@ export default function ScheduleMessageModal({
                         )}
                     </button>
 
-                    <p className="text-dark-500 text-xs text-center">
+                    <p className="text-xs text-center" style={{ color: 'var(--wa-text-light)' }}>
                         The message will be sent automatically at the scheduled time.
                     </p>
                 </form>

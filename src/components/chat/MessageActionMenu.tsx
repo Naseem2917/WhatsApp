@@ -26,6 +26,7 @@ interface MessageActionMenuProps {
     onReplyPrivately?: () => void; // For group chats only
     onReaction: (emoji: string) => void;
     onMoreEmojis?: () => void;
+    onReminder?: () => void; // Set reminder for this message
     isGroupChat?: boolean;
 }
 
@@ -45,6 +46,7 @@ export default function MessageActionMenu({
     onReplyPrivately,
     onReaction,
     onMoreEmojis,
+    onReminder,
     isGroupChat = false
 }: MessageActionMenuProps) {
     const [isOpen, setIsOpen] = useState(false);
@@ -73,6 +75,7 @@ export default function MessageActionMenu({
         { icon: 'copy', label: 'Copy', onClick: handleCopy },
         ...(isGroupChat && !isOwn ? [{ icon: 'reply-private', label: 'Reply privately', onClick: () => { onReplyPrivately?.(); setIsOpen(false); } }] : []),
         { icon: 'forward', label: 'Forward', onClick: () => { onForward(); setIsOpen(false); } },
+        { icon: 'reminder', label: 'Set Reminder', onClick: () => { onReminder?.(); setIsOpen(false); } },
         { icon: 'star', label: isStarred ? 'Unstar' : 'Star', onClick: () => { onStar(); setIsOpen(false); } },
         { icon: 'pin', label: isPinned ? 'Unpin' : 'Pin', onClick: () => { onPin(); setIsOpen(false); } },
         { icon: 'delete', label: 'Delete', onClick: () => { onDelete(); setIsOpen(false); } },
@@ -127,6 +130,12 @@ export default function MessageActionMenu({
                 return (
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                );
+            case 'reminder':
+                return (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                     </svg>
                 );
             default:

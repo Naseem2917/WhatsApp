@@ -348,14 +348,19 @@ export default function LoginPage() {
                         {authMode === 'phone' && phoneStep === 'otp' && (
                             <form onSubmit={handleOTPSubmit} className="space-y-6">
                                 <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-dark-300">
+                                    <label className="block text-sm font-medium text-gray-700">
                                         Enter 6-digit code
                                     </label>
                                     <input
                                         type="text"
                                         value={otp}
                                         onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                        className="w-full rounded-xl py-4 px-4 bg-dark-800 border border-dark-700 text-white text-center text-2xl tracking-[0.5em] placeholder-dark-500 focus:border-primary-500 focus:outline-none transition-colors"
+                                        className="w-full rounded-lg py-4 px-4 text-center text-2xl tracking-[0.5em] focus:outline-none transition-colors"
+                                        style={{
+                                            backgroundColor: '#f0f2f5',
+                                            border: '1px solid #e0e0e0',
+                                            color: '#111b21'
+                                        }}
                                         placeholder="••••••"
                                         required
                                         maxLength={6}
@@ -381,7 +386,7 @@ export default function LoginPage() {
                                 <button
                                     type="button"
                                     onClick={handleBackFromOTP}
-                                    className="w-full text-dark-400 hover:text-white text-sm transition-colors"
+                                    className="w-full text-gray-600 hover:text-gray-900 text-sm transition-colors"
                                 >
                                     ← Back to phone number
                                 </button>

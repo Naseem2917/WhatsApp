@@ -3,8 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { updateUserProfile, isUsernameUnique, isPhoneUnique } from '../services/userService';
 import { Sidebar } from '../components/layout';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../config/firebase';
+import { compressImageToBase64, validateImageFile, formatBytes } from '../utils/imageUtils';
 
 export default function ProfilePage() {
     const { userProfile, refreshUserProfile } = useAuth();
@@ -13,6 +12,7 @@ export default function ProfilePage() {
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(true);
 
     const photoInputRef = useRef<HTMLInputElement>(null);
@@ -37,31 +37,29 @@ export default function ProfilePage() {
     const handlePhotoUpload = async (file: File) => {
         if (!userProfile) return;
 
-        if (file.size > 5 * 1024 * 1024) {
-            setError('Image must be less than 5MB');
+        // Validate file
+        const validation = validateImageFile(file);
+        if (!validation.valid) {
+            setError(validation.error || 'Invalid file');
             return;
         }
 
         setUploadingPhoto(true);
         setError(null);
+        setCompressionInfo(null);
 
         try {
-            // Create a unique filename
-            const timestamp = Date.now();
-            const extension = file.name.split('.').pop();
-            const filePath = `profile-photos/${userProfile.uid}/${timestamp}.${extension}`;
-            const storageRef = ref(storage, filePath);
+            // Compress image to Base64 for Firestore storage (FREE!)
+            const compressed = await compressImageToBase64(file);
 
-            // Upload the file
-            const snapshot = await uploadBytes(storageRef, file);
-            console.log('Upload successful:', snapshot.metadata.fullPath);
+            // Show compression feedback
+            if (compressed.wasCompressed) {
+                setCompressionInfo(`Compressed from ${formatBytes(compressed.originalSize)} to ${formatBytes(compressed.compressedSize)}`);
+                setTimeout(() => setCompressionInfo(null), 4000);
+            }
 
-            // Get the download URL
-            const photoURL = await getDownloadURL(storageRef);
-            console.log('Download URL:', photoURL);
-
-            // Update user profile with new photo URL
-            await updateUserProfile(userProfile.uid, { photoURL });
+            // Save Base64 directly to Firestore (no Firebase Storage needed!)
+            await updateUserProfile(userProfile.uid, { photoURL: compressed.base64 });
             await refreshUserProfile();
             setSuccess('Profile photo updated successfully!');
         } catch (err) {
@@ -231,6 +229,17 @@ export default function ProfilePage() {
                                 style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}
                             >
                                 {success}
+                            </div>
+                        )}
+                        {compressionInfo && (
+                            <div
+                                className="mb-4 p-4 rounded-lg text-sm flex items-center gap-2"
+                                style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)', color: '#22c55e', border: '1px solid rgba(34, 197, 94, 0.2)' }}
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                {compressionInfo}
                             </div>
                         )}
 

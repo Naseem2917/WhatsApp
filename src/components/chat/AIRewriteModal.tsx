@@ -15,12 +15,18 @@ interface AIRewriteModalProps {
     onRewrite: (rewrittenMessage: string) => void;
 }
 
-const TONE_OPTIONS: { value: RewriteTone; label: string; emoji: string }[] = [
-    { value: 'professional', label: 'Professional', emoji: '💼' },
-    { value: 'casual', label: 'Casual', emoji: '😊' },
-    { value: 'short', label: 'Short', emoji: '⚡' },
-    { value: 'polite', label: 'Polite', emoji: '🙏' },
-    { value: 'friendly', label: 'Friendly', emoji: '🤗' },
+const TONE_OPTIONS: { value: RewriteTone; label: string; emoji: string; description: string }[] = [
+    { value: 'professional', label: 'Professional', emoji: '💼', description: 'Business tone' },
+    { value: 'casual', label: 'Casual', emoji: '😊', description: 'Relaxed chat' },
+    { value: 'short', label: 'Short', emoji: '⚡', description: 'Concise' },
+    { value: 'polite', label: 'Polite', emoji: '🙏', description: 'Courteous' },
+    { value: 'friendly', label: 'Friendly', emoji: '🤗', description: 'Warm & nice' },
+    { value: 'romantic', label: 'Romantic', emoji: '❤️', description: 'Sweet & loving' },
+    { value: 'funny', label: 'Funny', emoji: '😂', description: 'Humorous' },
+    { value: 'formal', label: 'Formal', emoji: '📜', description: 'Official tone' },
+    { value: 'hinglish', label: 'Hinglish', emoji: '🇮🇳', description: 'Hindi+English' },
+    { value: 'expand', label: 'Expand', emoji: '📝', description: 'Add details' },
+    { value: 'grammar', label: 'Fix Grammar', emoji: '✅', description: 'Correct errors' },
 ];
 
 export default function AIRewriteModal({ isOpen, originalMessage, onClose, onRewrite }: AIRewriteModalProps) {
@@ -71,12 +77,12 @@ export default function AIRewriteModal({ isOpen, originalMessage, onClose, onRew
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div
-                className="w-full max-w-sm mx-4 rounded-lg shadow-xl overflow-hidden"
+                className="w-full max-w-md mx-4 rounded-lg shadow-xl overflow-hidden max-h-[90vh] flex flex-col"
                 style={{ backgroundColor: 'var(--wa-bg-panel)' }}
             >
                 {/* Header */}
                 <div
-                    className="flex items-center justify-between px-4 py-3"
+                    className="flex items-center justify-between px-4 py-3 flex-shrink-0"
                     style={{ backgroundColor: 'var(--wa-bg-deeper)', borderBottom: '1px solid var(--wa-border)' }}
                 >
                     <div className="flex items-center gap-2">
@@ -95,26 +101,27 @@ export default function AIRewriteModal({ isOpen, originalMessage, onClose, onRew
                 </div>
 
                 {/* Original Message Preview */}
-                <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--wa-border)' }}>
+                <div className="px-4 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--wa-border)' }}>
                     <p className="text-xs mb-1" style={{ color: 'var(--wa-text-secondary)' }}>Original message:</p>
-                    <p className="text-sm" style={{ color: 'var(--wa-text-primary)' }}>
+                    <p className="text-sm line-clamp-2" style={{ color: 'var(--wa-text-primary)' }}>
                         {originalMessage || 'No message to rewrite'}
                     </p>
                 </div>
 
-                {/* Tone Options */}
-                <div className="p-4">
+                {/* Tone Options - Scrollable */}
+                <div className="p-4 overflow-y-auto flex-1">
                     <p className="text-xs mb-3" style={{ color: 'var(--wa-text-secondary)' }}>Select a tone:</p>
-                    <div className="grid grid-cols-2 gap-2">
-                        {TONE_OPTIONS.map(({ value, label, emoji }) => (
+                    <div className="grid grid-cols-3 gap-2">
+                        {TONE_OPTIONS.map(({ value, label, emoji, description }) => (
                             <button
                                 key={value}
                                 onClick={() => handleToneSelect(value)}
                                 disabled={isLoading}
+                                title={description}
                                 className={`
-                                    flex items-center gap-2 px-3 py-2 rounded-lg transition-all
+                                    flex flex-col items-center gap-1 px-2 py-3 rounded-lg transition-all text-center
                                     ${selectedTone === value ? 'ring-2 ring-green-500' : ''}
-                                    disabled:opacity-50
+                                    disabled:opacity-50 hover:scale-105
                                 `}
                                 style={{
                                     backgroundColor: 'var(--wa-bg-input)',
@@ -122,10 +129,10 @@ export default function AIRewriteModal({ isOpen, originalMessage, onClose, onRew
                                     border: '1px solid var(--wa-border)'
                                 }}
                             >
-                                <span>{emoji}</span>
-                                <span className="text-sm">{label}</span>
+                                <span className="text-xl">{emoji}</span>
+                                <span className="text-xs font-medium">{label}</span>
                                 {isLoading && selectedTone === value && (
-                                    <div className="spinner w-4 h-4 ml-auto" />
+                                    <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
                                 )}
                             </button>
                         ))}

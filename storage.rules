@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow authenticated users to read all files
+    // Allow users to write their own profile photos
+    match /profilePhotos/{userId}.jpg {
+      allow read: if request.auth != null;
+      allow write: if request.auth.uid == userId;
+    }
+    
+    // Allow authenticated users to read/write group photos
+    // (Group admin check should be done in app code)
+    match /groupPhotos/{chatId}.jpg {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Chat files - existing rules
+    match /chats/{chatId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Legacy profile photos path
+    match /profile-photos/{userId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth.uid == userId;
+    }
+  }
+}

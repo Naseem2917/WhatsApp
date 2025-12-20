@@ -8,6 +8,7 @@ import {
     subscribeToChatMessages,
     sendMessage,
     markMessagesAsRead,
+    markMessagesAsDelivered,
     setTypingStatus,
     subscribeToTypingStatus,
     makeGroupAdmin,
@@ -22,6 +23,7 @@ import EmojiPicker, { Theme } from 'emoji-picker-react';
 import AIFeaturesPanel from '../components/chat/AIFeaturesPanel';
 import ConversationSummaryModal from '../components/chat/ConversationSummaryModal';
 import ScheduleMessageModal from '../components/chat/ScheduleMessageModal';
+import SetReminderModal from '../components/chat/SetReminderModal';
 import TripPlannerModal from '../components/chat/TripPlannerModal';
 import TripPlannerFormModal from '../components/chat/TripPlannerFormModal';
 import SmartRepliesPanel from '../components/chat/SmartRepliesPanel';
@@ -30,9 +32,8 @@ import UserProfilePanel from '../components/chat/UserProfilePanel';
 import MessageActionMenu from '../components/chat/MessageActionMenu';
 import ForwardModal from '../components/chat/ForwardModal';
 import AIRewriteModal from '../components/chat/AIRewriteModal';
-import AISuggestionBar from '../components/chat/AISuggestionBar';
-import { analyzeMessageIntent, type AIChatActionResponse } from '../services/aiService';
 import type { Chat, Message, UserProfile } from '../types';
+import { formatFileSize } from '../services/fileService';
 
 export default function ChatPage() {
     const { chatId } = useParams<{ chatId: string }>();
@@ -71,14 +72,24 @@ export default function ChatPage() {
     const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
     const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
     const [showAIRewrite, setShowAIRewrite] = useState(false);
-    const [aiSuggestion, setAiSuggestion] = useState<AIChatActionResponse | null>(null);
     const [showMoreEmojis, setShowMoreEmojis] = useState<{ messageId: string } | null>(null);
+    const [showStarredOnly, setShowStarredOnly] = useState(false);
+    const [compressionInfo, setCompressionInfo] = useState<string | null>(null);
+    const [reminderMessage, setReminderMessage] = useState<Message | null>(null);
 
-    // Filter messages based on search query
+    // Filter messages based on search query and starred filter
     const filteredMessages = messages.filter(msg => {
+        // Filter by starred
+        if (showStarredOnly && !msg.starredBy?.includes(userProfile?.uid || '')) {
+            return false;
+        }
+        // Filter by search query
         if (!chatSearchQuery.trim()) return true;
         return msg.content.toLowerCase().includes(chatSearchQuery.toLowerCase());
     });
+
+    // Count starred messages for badge
+    const starredCount = messages.filter(msg => msg.starredBy?.includes(userProfile?.uid || '')).length;
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -156,12 +167,31 @@ export default function ChatPage() {
         return () => unsubscribe();
     }, [chatId]);
 
-    // Mark messages as read
+    // Scroll to bottom when messages are loaded or new message arrives
     useEffect(() => {
-        if (!chatId || !userProfile?.uid || messages.length === 0) return;
-        const timeout = setTimeout(() => {
-            markMessagesAsRead(chatId, userProfile.uid);
-        }, 500);
+        if (messages.length > 0 && messagesEndRef.current) {
+            // Small delay to ensure DOM is updated
+            const timeout = setTimeout(() => {
+                messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+            }, 100);
+            return () => clearTimeout(timeout);
+        }
+    }, [messages.length, chatId]);
+
+    // Mark messages as delivered (double tick) then read (blue tick) when chat is opened
+    useEffect(() => {
+        if (!chatId || !userProfile?.uid) return;
+
+        // First mark as delivered (for the sender's UI to show double tick)
+        // Then mark as read (for the sender's UI to show blue tick, and reset our unread count)
+        const markMessages = async () => {
+            // Mark incoming messages as delivered first (shows double tick to sender)
+            await markMessagesAsDelivered(chatId, userProfile.uid);
+            // Then mark as read (shows blue tick to sender) and reset unread count
+            await markMessagesAsRead(chatId, userProfile.uid);
+        };
+
+        const timeout = setTimeout(markMessages, 200);
         return () => clearTimeout(timeout);
     }, [chatId, userProfile?.uid, messages.length]);
 
@@ -182,30 +212,6 @@ export default function ChatPage() {
             }
         };
     }, [chatId, userProfile?.uid, isTyping]);
-
-    // Analyze incoming messages for AI suggestions (only from others, not own)
-    useEffect(() => {
-        const lastMessage = messages[messages.length - 1];
-        if (!lastMessage || lastMessage.senderId === userProfile?.uid) return;
-
-        // Only analyze messages received in the last 5 seconds
-        const messageAge = Date.now() - new Date(lastMessage.timestamp).getTime();
-        if (messageAge > 5000) return;
-
-        // Analyze with AI
-        const analyzeMessage = async () => {
-            try {
-                const result = await analyzeMessageIntent(lastMessage.content);
-                if (result.suggestedAction !== 'none') {
-                    setAiSuggestion(result);
-                }
-            } catch (error) {
-                console.error('AI analysis failed:', error);
-            }
-        };
-
-        analyzeMessage();
-    }, [messages, userProfile?.uid]);
 
     const handleTyping = useCallback(() => {
         if (!chatId || !userProfile?.uid) return;
@@ -418,6 +424,17 @@ export default function ChatPage() {
                                     />
                                 )}
 
+                                {/* Call Button - Coming Soon */}
+                                <button
+                                    className="icon-btn opacity-50 cursor-not-allowed"
+                                    title="Voice/Video Call (Coming Soon)"
+                                    disabled
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                    </svg>
+                                </button>
+
                                 <button
                                     className="icon-btn"
                                     onClick={() => setShowSearch(true)}
@@ -445,6 +462,14 @@ export default function ChatPage() {
                                                 onClick: () => {
                                                     setShowChatMenu(false);
                                                     chat?.isGroup ? setShowGroupInfo(true) : setShowUserProfile(true);
+                                                }
+                                            },
+                                            {
+                                                label: showStarredOnly ? 'Show All Messages' : `Starred Messages${starredCount > 0 ? ` (${starredCount})` : ''}`,
+                                                icon: <svg className="w-5 h-5" fill={showStarredOnly ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>,
+                                                onClick: () => {
+                                                    setShowChatMenu(false);
+                                                    setShowStarredOnly(!showStarredOnly);
                                                 }
                                             },
                                             {
@@ -559,6 +584,7 @@ export default function ChatPage() {
                                                         }
                                                     }}
                                                     onMoreEmojis={() => setShowMoreEmojis({ messageId: message.id })}
+                                                    onReminder={() => setReminderMessage(message)}
                                                 />
 
                                                 <div
@@ -658,6 +684,13 @@ export default function ChatPage() {
                     <div ref={messagesEndRef} />
                 </div>
 
+                {/* Compression Info Toast */}
+                {compressionInfo && (
+                    <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg text-sm text-white shadow-lg z-50" style={{ backgroundColor: 'var(--wa-green)' }}>
+                        {compressionInfo}
+                    </div>
+                )}
+
                 {/* Message Input */}
                 <form onSubmit={handleSendMessage} className="wa-header p-3 flex-shrink-0 relative" style={{ borderTop: '1px solid var(--wa-border)' }}>
                     {/* Reply Preview Bar - WhatsApp style */}
@@ -724,7 +757,7 @@ export default function ChatPage() {
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*,application/pdf,.doc,.docx,.txt"
+                            accept="image/*,.txt"
                             className="hidden"
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
@@ -737,8 +770,17 @@ export default function ChatPage() {
                                 }
 
                                 setIsUploading(true);
+                                setCompressionInfo(null);
                                 try {
                                     const result = await uploadFile(file, chatId, userProfile.uid);
+
+                                    // Show compression feedback for images
+                                    if (result.fileType === 'image' && result.originalSize > result.fileSize) {
+                                        const savings = formatFileSize(result.originalSize - result.fileSize);
+                                        setCompressionInfo(`Compressed from ${formatFileSize(result.originalSize)} to ${formatFileSize(result.fileSize)} (saved ${savings})`);
+                                        setTimeout(() => setCompressionInfo(null), 4000);
+                                    }
+
                                     await sendMessage(
                                         chatId,
                                         userProfile.uid,
@@ -933,24 +975,16 @@ export default function ChatPage() {
                 }}
             />
 
-            {/* AI Suggestion Bar - show above input when suggestion available */}
-            {aiSuggestion && aiSuggestion.suggestedAction !== 'none' && (
-                <div className="absolute bottom-24 left-4 right-4 z-40">
-                    <AISuggestionBar
-                        suggestion={aiSuggestion}
-                        onAccept={() => {
-                            if (aiSuggestion.suggestedAction === 'reply' && aiSuggestion.suggestedText) {
-                                setNewMessage(aiSuggestion.suggestedText);
-                                inputRef.current?.focus();
-                            } else if (aiSuggestion.suggestedAction === 'schedule_message') {
-                                setShowScheduleModal(true);
-                            }
-                            setAiSuggestion(null);
-                        }}
-                        onDismiss={() => setAiSuggestion(null)}
-                    />
-                </div>
-            )}
+            {/* Set Reminder Modal */}
+            <SetReminderModal
+                isOpen={!!reminderMessage}
+                onClose={() => setReminderMessage(null)}
+                messageId={reminderMessage?.id || ''}
+                messageContent={reminderMessage?.content || ''}
+                chatId={chatId || ''}
+                chatName={chat?.isGroup ? chat.groupName : otherUser?.displayName}
+                userId={userProfile?.uid || ''}
+            />
 
             {/* Full Emoji Picker for + button in reactions */}
             {showMoreEmojis && (

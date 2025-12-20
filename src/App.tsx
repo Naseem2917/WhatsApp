@@ -4,6 +4,8 @@ import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import OnlineStatusHeartbeat from './components/OnlineStatusHeartbeat';
 import ScheduledMessageProcessor from './components/ScheduledMessageProcessor';
+import ReminderProcessor from './components/ReminderProcessor';
+import UnreadBadgeTitle from './components/UnreadBadgeTitle';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import OnboardingPage from './pages/OnboardingPage';
@@ -19,6 +21,10 @@ function App() {
                 <AuthProvider>
                     {/* Process scheduled messages in background */}
                     <ScheduledMessageProcessor />
+                    {/* Process reminders and show notifications */}
+                    <ReminderProcessor />
+                    {/* Update browser tab title with unread count */}
+                    <UnreadBadgeTitle />
                     <OnlineStatusHeartbeat />
                     <Routes>
                         {/* Public routes */}
