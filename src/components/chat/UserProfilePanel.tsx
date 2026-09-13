@@ -4,6 +4,7 @@
  */
 
 import { UserProfile } from '../../types';
+import { isUserOnline } from '../../services/userService';
 
 interface UserProfilePanelProps {
     user: UserProfile | null;
@@ -78,7 +79,7 @@ export default function UserProfilePanel({ user, isOpen, onClose }: UserProfileP
                         <p className="text-sm" style={{ color: 'var(--wa-text-light)' }}>
                             @{user.username}
                         </p>
-                        {user.isOnline ? (
+                        {isUserOnline(user) ? (
                             <span className="flex items-center gap-2 mt-2 text-sm" style={{ color: 'var(--wa-green)' }}>
                                 <span className="w-2 h-2 rounded-full bg-green-500" />
                                 Online

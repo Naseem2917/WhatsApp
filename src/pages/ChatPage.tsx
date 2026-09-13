@@ -18,7 +18,7 @@ import {
     toggleMessagePin
 } from '../services/chatService';
 import { uploadFile, validateFile } from '../services/fileService';
-import { getUserById } from '../services/userService';
+import { getUserById, subscribeToUserProfile, isUserOnline } from '../services/userService';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import AIFeaturesPanel from '../components/chat/AIFeaturesPanel';
 import ConversationSummaryModal from '../components/chat/ConversationSummaryModal';
@@ -157,6 +157,21 @@ export default function ChatPage() {
 
         loadChat();
     }, [chatId, userProfile, navigate]);
+
+    // Subscribe to current chat partner's profile in real time (free-tier safe: only 1 document listener)
+    useEffect(() => {
+        if (!chat || chat.isGroup || !userProfile?.uid) return;
+        const otherUserId = chat.participants.find((id) => id !== userProfile.uid);
+        if (!otherUserId) return;
+
+        const unsubscribe = subscribeToUserProfile(otherUserId, (updatedProfile) => {
+            if (updatedProfile) {
+                setOtherUser(updatedProfile);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [chat?.id, chat?.isGroup, userProfile?.uid]);
 
     // Subscribe to messages
     useEffect(() => {
@@ -349,7 +364,7 @@ export default function ChatPage() {
                                             </span>
                                         )}
                                     </div>
-                                    {!chat?.isGroup && otherUser?.isOnline && (
+                                    {!chat?.isGroup && isUserOnline(otherUser) && (
                                         <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full" style={{ backgroundColor: 'var(--wa-green)', border: '2px solid var(--wa-bg-header)' }} />
                                     )}
                                 </div>
@@ -367,7 +382,7 @@ export default function ChatPage() {
                                             <span style={{ color: 'var(--wa-green)' }}>typing...</span>
                                         ) : chat?.isGroup ? (
                                             `${chat.participants.length} members`
-                                        ) : otherUser?.isOnline ? (
+                                        ) : isUserOnline(otherUser) ? (
                                             <span style={{ color: 'var(--wa-green)' }}>Online</span>
                                         ) : (
                                             `Last seen ${otherUser?.lastSeen ? formatTime(otherUser.lastSeen) : 'recently'}`

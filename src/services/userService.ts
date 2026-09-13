@@ -8,7 +8,8 @@ import {
     collection,
     updateDoc,
     serverTimestamp,
-    Timestamp
+    Timestamp,
+    onSnapshot
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { UserProfile } from '../types';
@@ -62,6 +63,57 @@ export async function getUserById(uid: string): Promise<UserProfile | null> {
     }
 
     return null;
+}
+
+/**
+ * Subscribe to real-time updates for a specific user profile.
+ * Free-tier friendly: Only listens to the active chat partner and cleans up on unmount.
+ */
+export function subscribeToUserProfile(
+    uid: string,
+    callback: (user: UserProfile | null) => void
+): () => void {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    return onSnapshot(
+        userRef,
+        (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                callback({
+                    ...data,
+                    createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
+                    lastSeen: (data.lastSeen as Timestamp)?.toDate() || new Date(),
+                } as UserProfile);
+            } else {
+                callback(null);
+            }
+        },
+        (error) => {
+            console.error('Error listening to user profile:', error);
+            callback(null);
+        }
+    );
+}
+
+/**
+ * Free-tier safe online check:
+ * Considers a user online only if:
+ * 1. user.isOnline is true
+ * 2. AND user.lastSeen was updated within the last 3.5 minutes (210,000 ms)
+ * If user closed the tab abruptly, they automatically appear offline after 3.5 mins with ZERO extra database writes!
+ */
+export function isUserOnline(user: UserProfile | null | undefined): boolean {
+    if (!user || !user.isOnline) return false;
+    if (!user.lastSeen) return false;
+
+    const lastSeenTime =
+        user.lastSeen instanceof Date
+            ? user.lastSeen.getTime()
+            : new Date(user.lastSeen).getTime();
+
+    if (isNaN(lastSeenTime)) return false;
+
+    return Date.now() - lastSeenTime < 3.5 * 60 * 1000;
 }
 
 /**

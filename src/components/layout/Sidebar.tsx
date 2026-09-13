@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { subscribeToUserChats } from '../../services/chatService';
-import { getUserById } from '../../services/userService';
+import { getUserById, isUserOnline } from '../../services/userService';
 import { NewChatModal, CreateGroupModal } from '../chat';
 import { DropdownMenu } from '../common';
 import type { Chat, UserProfile } from '../../types';
@@ -75,6 +75,13 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
 
         return () => unsubscribe();
     }, [userProfile?.uid]);
+
+    // Zero-read presence ticker: re-evaluates isUserOnline timestamps every 30s with 0 database reads
+    const [, setTick] = useState(0);
+    useEffect(() => {
+        const timer = setInterval(() => setTick((t) => t + 1), 30000);
+        return () => clearInterval(timer);
+    }, []);
 
     // Filter chats
     const filteredChats = chats.filter((chat) => {
@@ -324,7 +331,7 @@ export function Sidebar({ isOpen, onClose, selectedChatId }: SidebarProps) {
                                                 </span>
                                             )}
                                         </div>
-                                        {!chat.isGroup && chat.otherUser?.isOnline && (
+                                        {!chat.isGroup && isUserOnline(chat.otherUser) && (
                                             <span className="absolute bottom-0 right-0 w-3 h-3 rounded-full" style={{ backgroundColor: 'var(--wa-green)', border: '2px solid var(--wa-bg-panel)' }} />
                                         )}
                                     </div>
