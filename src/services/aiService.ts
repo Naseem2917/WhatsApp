@@ -6,7 +6,7 @@
  */
 
 // Worker URL from environment or fallback
-const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://whatsapp.khannaseem1704.workers.dev';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://whatsapp.naseem2917.workers.dev';
 
 interface Message {
     id?: string;
@@ -26,6 +26,9 @@ interface Participant {
 interface WorkerResponse {
     success?: boolean;
     text?: string;
+    response?: string;
+    modelUsed?: string;
+    latencyMs?: number;
     error?: string;
     raw?: unknown;
 }
@@ -38,11 +41,16 @@ function extractWorkerText(response: WorkerResponse): string {
         throw new Error(response.error);
     }
 
-    if (!response.text) {
+    const text = response.text || response.response;
+    if (!text) {
         throw new Error('No response from AI');
     }
 
-    return response.text.trim();
+    if (response.modelUsed) {
+        console.debug(`[AI] Response served by ${response.modelUsed} in ${response.latencyMs ?? '?'}ms`);
+    }
+
+    return text.trim();
 }
 
 /**
@@ -239,6 +247,10 @@ export async function scheduleMessage(
  */
 export async function checkAIServiceHealth(): Promise<boolean> {
     try {
+        const healthUrl = `${WORKER_URL.replace(/\/+$/, '')}/health`;
+        const res = await fetch(healthUrl).catch(() => null);
+        if (res && res.ok) return true;
+
         const response = await fetch(WORKER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

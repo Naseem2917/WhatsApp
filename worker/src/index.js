@@ -1,301 +1,445 @@
 /**
- * WhatsApp Clone - Cloudflare Worker with AI Features
- * Uses Google Gemini API for AI capabilities
+ * WhatsApp Clone - Cloudflare Worker with Resilient Multi-Model AI Fallback
+ * 
+ * Exact PromptWise Fallback Chain:
+ * 1. Fast & responsive: gemini-3.5-flash-lite (~900ms)
+ * 2. Overload / rate-limit fallback: gemini-3.6-flash
+ * 3. High reasoning fallback: gemini-3.7-flash
  */
+
+const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-goog-api-key',
+};
+
+// ── Model constants (exact PromptWise models) ─────────────────────────────────
+
+const MODEL_LITE = 'gemini-3.5-flash-lite';
+const MODEL_MID  = 'gemini-3.6-flash';
+const MODEL_HIGH = 'gemini-3.7-flash';
+
+/**
+ * Single, optimized fallback chain:
+ * 1. Fast & responsive: gemini-3.5-flash-lite (~900ms)
+ * 2. Overload / rate-limit fallback: gemini-3.6-flash
+ * 3. High reasoning fallback: gemini-3.7-flash
+ */
+const FALLBACK_MODELS = [MODEL_LITE, MODEL_MID, MODEL_HIGH];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function jsonResponse(data, status = 200, extraHeaders = {}) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: {
+            'Content-Type': 'application/json',
+            ...CORS_HEADERS,
+            ...extraHeaders,
+        },
+    });
+}
+
+/**
+ * Returns true if the HTTP status code signals a transient/overload error
+ * that warrants trying the next model in the fallback chain.
+ * Non-retryable errors (401, 403, 400, etc.) will NOT trigger a model switch.
+ */
+function isRetryableStatus(status) {
+    return [429, 500, 502, 503, 504].includes(status);
+}
+
+// ── Core Gemini caller (single model, with timeout & header auth) ─────────────
+
+const REQUEST_TIMEOUT_MS = 20_000; // 20 s per-model timeout
+
+async function callGemini(apiKey, model, userPrompt, systemPrompt = '') {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response;
+    try {
+        const bodyPayload = {
+            contents: [{ parts: [{ text: userPrompt }] }],
+            generationConfig: {
+                temperature: 0.3,
+            },
+        };
+
+        if (systemPrompt) {
+            bodyPayload.systemInstruction = { parts: [{ text: systemPrompt }] };
+        }
+
+        response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': apiKey, // Key in header, NOT in URL query string
+            },
+            body: JSON.stringify(bodyPayload),
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+        const errBody = await response.text().catch(() => response.statusText);
+        const err = new Error(`Gemini ${response.status}: ${errBody}`);
+        err.status = response.status;
+        throw err;
+    }
+
+    const data = await response.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated.';
+}
+
+// ── Multi-model caller with immediate fallback ───────────────────────────────
+
+async function callWithModelList(apiKey, models, userPrompt, systemPrompt = '') {
+    let lastError = new Error('No models available');
+
+    for (const model of models) {
+        const start = Date.now();
+        try {
+            const text = await callGemini(apiKey, model, userPrompt, systemPrompt);
+            return { text, modelUsed: model, latencyMs: Date.now() - start };
+        } catch (err) {
+            lastError = err;
+
+            // Abort = timeout → try next model immediately
+            if (err.name === 'AbortError') {
+                console.warn(`[Gemini] ${model} timed out. Trying next model…`);
+                continue;
+            }
+
+            // Retryable server/overload error → try next model immediately
+            if (err.status !== undefined && isRetryableStatus(err.status)) {
+                console.warn(`[Gemini] ${model} returned ${err.status}. Trying next model…`);
+                continue;
+            }
+
+            // Non-retryable (401 bad key, 400 bad request, etc.) → stop immediately
+            console.error(`[Gemini] ${model} returned non-retryable error ${err.status ?? 'unknown'}. Aborting fallback.`);
+            throw err;
+        }
+    }
+
+    throw lastError;
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────────
 
 export default {
     async fetch(request, env, ctx) {
-        const MODEL_NAME = "gemini-2.0-flash";
-
-        // CORS Headers
-        const corsHeaders = {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-        };
-
-        // Handle Preflight (OPTIONS) requests
-        if (request.method === "OPTIONS") {
-            return new Response(null, { headers: corsHeaders });
-        }
-
         const url = new URL(request.url);
         const path = url.pathname;
 
-        // Health check endpoint
-        if (path === "/health" && request.method === "GET") {
-            return new Response(JSON.stringify({ status: "ok" }), {
-                headers: { ...corsHeaders, "Content-Type": "application/json" }
+        // CORS preflight
+        if (request.method === 'OPTIONS') {
+            return new Response(null, {
+                status: 204,
+                headers: CORS_HEADERS,
             });
         }
 
-        // Only allow POST for API endpoints
-        if (request.method !== "POST" && path.startsWith("/api/")) {
-            return new Response("Method Not Allowed", { status: 405, headers: corsHeaders });
+        // ── GET /health & GET /api/health ────────────────────────────────────
+        if (request.method === 'GET' && (path === '/health' || path === '/api/health')) {
+            return jsonResponse({
+                status: 'ok',
+                success: true,
+                message: 'WhatsApp AI Proxy is working',
+                models: FALLBACK_MODELS,
+                environment: env.ENVIRONMENT || 'production',
+            });
+        }
+
+        if (request.method !== 'POST') {
+            return new Response('Method Not Allowed', {
+                status: 405,
+                headers: CORS_HEADERS,
+            });
+        }
+
+        const apiKey = env.GEMINI_API_KEY;
+        if (!apiKey) {
+            return jsonResponse(
+                { error: 'Configuration Error: Missing GEMINI_API_KEY in Cloudflare Worker' },
+                500
+            );
         }
 
         try {
-            const apiKey = env.GEMINI_API_KEY;
+            const body = await request.json().catch(() => ({}));
 
-            if (!apiKey) {
-                return new Response(JSON.stringify({ error: "API Key missing" }), {
-                    status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
-                });
-            }
+            // ── Route: POST /api/summarize ───────────────────────────────────
+            if (path === '/api/summarize') {
+                const messages = Array.isArray(body.messages) ? body.messages : [];
+                let userPrompt = body.prompt || body.query || '';
 
-            // Route to appropriate handler
-            switch (path) {
-                case "/api/summarize":
-                    return await handleSummarize(request, apiKey, MODEL_NAME, corsHeaders);
+                if (!userPrompt && messages.length > 0) {
+                    const conversation = messages
+                        .map((m) => `${m.sender || m.senderId || 'User'}: ${m.content}`)
+                        .join('\n');
+                    userPrompt = `Summarize this conversation:\n\n${conversation}`;
+                }
 
-                case "/api/importance":
-                    return await handleImportance(request, apiKey, MODEL_NAME, corsHeaders);
+                if (!userPrompt.trim()) {
+                    return jsonResponse({ error: 'Messages or prompt is required for summarize.' }, 400);
+                }
 
-                case "/api/smart-reply":
-                    return await handleSmartReply(request, apiKey, MODEL_NAME, corsHeaders);
-
-                case "/api/trip-plan":
-                    return await handleTripPlan(request, apiKey, MODEL_NAME, corsHeaders);
-
-                case "/api/schedule":
-                    return await handleSchedule(request, corsHeaders);
-
-                default:
-                    // Generic Gemini endpoint for backward compatibility
-                    return await handleGeneric(request, apiKey, MODEL_NAME, corsHeaders);
-            }
-
-        } catch (error) {
-            return new Response(JSON.stringify({ error: error.message }), {
-                status: 500,
-                headers: { ...corsHeaders, "Content-Type": "application/json" }
-            });
-        }
-    }
-};
-
-// Helper function to call Gemini API
-async function callGemini(apiKey, model, prompt, systemInstruction) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    const payload = {
-        contents: [{ parts: [{ text: prompt }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 2048,
-        }
-    };
-
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-        throw new Error(data.error.message);
-    }
-
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-}
-
-// Summarize conversation
-async function handleSummarize(request, apiKey, model, corsHeaders) {
-    const body = await request.json();
-    const messages = body.messages || [];
-
-    if (messages.length === 0) {
-        return new Response(JSON.stringify({ error: "No messages provided" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
-
-    const conversation = messages.map(m => `${m.sender}: ${m.content}`).join("\n");
-
-    const systemInstruction = `You are a conversation summarizer. Analyze the chat and provide a concise summary highlighting:
+                const systemPrompt =
+                    body.systemPrompt ||
+                    body.systemInstruction ||
+                    `You are a conversation summarizer. Analyze the chat and provide a concise summary highlighting:
 - Key decisions made
 - Important dates/times mentioned
 - Action items or tasks
 - Main topics discussed
-Format the response with clear sections.`;
+Format the response with clear sections using markdown.`;
 
-    const prompt = `Summarize this conversation:\n\n${conversation}`;
+                const { text, modelUsed, latencyMs } = await callWithModelList(
+                    apiKey,
+                    FALLBACK_MODELS,
+                    userPrompt,
+                    systemPrompt
+                );
 
-    const summary = await callGemini(apiKey, model, prompt, systemInstruction);
+                console.log(`[summarize] model=${modelUsed} latency=${latencyMs}ms`);
 
-    return new Response(JSON.stringify({ summary }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+                return jsonResponse({
+                    success: true,
+                    text,
+                    summary: text,
+                    response: text,
+                    modelUsed,
+                    latencyMs,
+                });
+            }
 
-// Detect important messages
-async function handleImportance(request, apiKey, model, corsHeaders) {
-    const body = await request.json();
-    const messages = body.messages || [];
-    const userId = body.userId;
+            // ── Route: POST /api/importance ──────────────────────────────────
+            if (path === '/api/importance') {
+                const messages = Array.isArray(body.messages) ? body.messages : [];
+                let userPrompt = body.prompt || '';
 
-    if (messages.length === 0) {
-        return new Response(JSON.stringify({ importantMessages: [] }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
+                if (!userPrompt && messages.length > 0) {
+                    const userId = body.userId;
+                    const unread = userId
+                        ? messages.filter((m) => (m.sender || m.senderId) !== userId)
+                        : messages;
 
-    const messagesWithIds = messages.map(m => `[ID:${m.id}] ${m.sender}: ${m.content}`).join("\n");
+                    const formatted = unread
+                        .map((m) => `[ID:${m.id || 'unknown'}] ${m.sender || m.senderId || 'User'}: ${m.content}`)
+                        .join('\n');
 
-    const systemInstruction = `You are analyzing chat messages to find important ones that need attention. Identify messages that:
+                    userPrompt = `Find important messages in this chat:\n\n${formatted}\n\nReturn ONLY the JSON array of IDs.`;
+                }
+
+                if (!userPrompt.trim()) {
+                    return jsonResponse({ success: true, importantMessages: [] });
+                }
+
+                const systemPrompt =
+                    body.systemPrompt ||
+                    body.systemInstruction ||
+                    `You are analyzing chat messages to find important ones that need attention. Identify messages that:
 - Ask direct questions
 - Request action or response
 - Mention deadlines or urgency
 - Contain important information
-Return ONLY a JSON array of message IDs that are important. Example: ["id1", "id2"]`;
+Return ONLY a JSON array of message IDs that are important. Example: ["id1", "id2"]
+If none are important, return: []`;
 
-    const prompt = `Find important messages in this chat:\n\n${messagesWithIds}\n\nReturn ONLY the JSON array of IDs.`;
+                const { text, modelUsed, latencyMs } = await callWithModelList(
+                    apiKey,
+                    FALLBACK_MODELS,
+                    userPrompt,
+                    systemPrompt
+                );
 
-    const result = await callGemini(apiKey, model, prompt, systemInstruction);
+                console.log(`[importance] model=${modelUsed} latency=${latencyMs}ms`);
 
-    // Parse the JSON array from the response
-    let importantMessages = [];
-    try {
-        const match = result.match(/\[.*\]/s);
-        if (match) {
-            importantMessages = JSON.parse(match[0]);
-        }
-    } catch (e) {
-        console.error("Failed to parse importance result:", e);
-    }
+                let importantMessages = [];
+                try {
+                    const match = text.match(/\[[\s\S]*?\]/);
+                    if (match) {
+                        importantMessages = JSON.parse(match[0]);
+                    }
+                } catch (e) {
+                    console.error('Failed to parse importance result:', e);
+                }
 
-    return new Response(JSON.stringify({ importantMessages }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+                return jsonResponse({
+                    success: true,
+                    text,
+                    importantMessages,
+                    modelUsed,
+                    latencyMs,
+                });
+            }
 
-// Generate smart replies
-async function handleSmartReply(request, apiKey, model, corsHeaders) {
-    const body = await request.json();
-    const messages = body.messages || [];
+            // ── Route: POST /api/smart-reply ─────────────────────────────────
+            if (path === '/api/smart-reply') {
+                const messages = Array.isArray(body.messages) ? body.messages : [];
+                let userPrompt = body.prompt || '';
 
-    if (messages.length === 0) {
-        return new Response(JSON.stringify({ suggestions: [] }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
+                if (!userPrompt && messages.length > 0) {
+                    const recent = messages.slice(-5).map((m) =>
+                        `${m.isOwn ? 'You' : (m.sender || 'Other')}: ${m.content}`
+                    ).join('\n');
+                    userPrompt = `Recent conversation:\n${recent}\n\nGenerate 3 reply suggestions as a JSON array.`;
+                }
 
-    const recentMessages = messages.slice(-5).map(m =>
-        `${m.isOwn ? "You" : m.sender}: ${m.content}`
-    ).join("\n");
+                if (!userPrompt.trim()) {
+                    return jsonResponse({ success: true, suggestions: ['👍', 'Okay!', 'Got it'] });
+                }
 
-    const systemInstruction = `Generate 3 natural, contextual reply suggestions based on the conversation. 
-Keep replies short (under 10 words each), casual, and appropriate.
+                const systemPrompt =
+                    body.systemPrompt ||
+                    body.systemInstruction ||
+                    `Generate 3 natural, contextual reply suggestions based on the conversation.
+Keep replies short (under 10 words each), casual, and appropriate for WhatsApp.
 Return ONLY a JSON array of 3 strings. Example: ["Sure!", "I'll check and let you know", "Thanks!"]`;
 
-    const prompt = `Recent conversation:\n${recentMessages}\n\nGenerate 3 reply suggestions as a JSON array.`;
+                const { text, modelUsed, latencyMs } = await callWithModelList(
+                    apiKey,
+                    FALLBACK_MODELS,
+                    userPrompt,
+                    systemPrompt
+                );
 
-    const result = await callGemini(apiKey, model, prompt, systemInstruction);
+                console.log(`[smart-reply] model=${modelUsed} latency=${latencyMs}ms`);
 
-    let suggestions = [];
-    try {
-        const match = result.match(/\[.*\]/s);
-        if (match) {
-            suggestions = JSON.parse(match[0]);
-        }
-    } catch (e) {
-        suggestions = ["👍", "Okay!", "Got it"];
-    }
+                let suggestions = [];
+                try {
+                    const match = text.match(/\[[\s\S]*?\]/);
+                    if (match) {
+                        suggestions = JSON.parse(match[0]);
+                    } else {
+                        suggestions = text
+                            .split('\n')
+                            .map((s) => s.replace(/^\d+[\.\)]\s*/, '').trim())
+                            .filter(Boolean)
+                            .slice(0, 3);
+                    }
+                } catch (e) {
+                    suggestions = ['👍', 'Okay!', 'Got it'];
+                }
 
-    return new Response(JSON.stringify({ suggestions }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+                return jsonResponse({
+                    success: true,
+                    text,
+                    suggestions,
+                    modelUsed,
+                    latencyMs,
+                });
+            }
 
-// Generate trip plan
-async function handleTripPlan(request, apiKey, model, corsHeaders) {
-    const body = await request.json();
-    const messages = body.messages || [];
-    const participants = body.participants || [];
+            // ── Route: POST /api/trip-plan ───────────────────────────────────
+            if (path === '/api/trip-plan') {
+                const messages = Array.isArray(body.messages) ? body.messages : [];
+                const participants = Array.isArray(body.participants) ? body.participants : [];
+                let userPrompt = body.prompt || '';
 
-    const conversation = messages.map(m => `${m.sender}: ${m.content}`).join("\n");
-    const participantList = participants.map(p => `- ${p.name} (from ${p.location})`).join("\n");
+                if (!userPrompt && messages.length > 0) {
+                    const conversation = messages
+                        .map((m) => `${m.sender || m.senderId || 'User'}: ${m.content}`)
+                        .join('\n');
+                    const participantList = participants
+                        .map((p) => `- ${p.name} (from ${p.location})`)
+                        .join('\n');
+                    userPrompt = `Group members:\n${participantList}\n\nConversation about the trip:\n${conversation}\n\nCreate a detailed trip plan.`;
+                }
 
-    const systemInstruction = `You are a trip planning assistant. Based on the group chat discussion, create a comprehensive trip plan including:
+                if (!userPrompt.trim()) {
+                    return jsonResponse({ error: 'Trip details or messages required.' }, 400);
+                }
+
+                const systemPrompt =
+                    body.systemPrompt ||
+                    body.systemInstruction ||
+                    `You are a trip planning assistant. Based on the group chat discussion, create a comprehensive trip plan including:
 - Suggested destination
 - Proposed dates/times
 - Departure schedule from each participant's location
 - Things to prepare
 - Meeting points
-Format with clear sections and bullet points.`;
+Format with clear sections and markdown bullet points.`;
 
-    const prompt = `Group members:\n${participantList}\n\nConversation about the trip:\n${conversation}\n\nCreate a detailed trip plan.`;
+                const { text, modelUsed, latencyMs } = await callWithModelList(
+                    apiKey,
+                    FALLBACK_MODELS,
+                    userPrompt,
+                    systemPrompt
+                );
 
-    const tripPlan = await callGemini(apiKey, model, prompt, systemInstruction);
+                console.log(`[trip-plan] model=${modelUsed} latency=${latencyMs}ms`);
 
-    return new Response(JSON.stringify({ tripPlan }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+                return jsonResponse({
+                    success: true,
+                    text,
+                    tripPlan: text,
+                    response: text,
+                    modelUsed,
+                    latencyMs,
+                });
+            }
 
-// Handle scheduled message (just validates and returns success)
-async function handleSchedule(request, corsHeaders) {
-    const body = await request.json();
-    const { messageContent, scheduledTime, recipientName } = body;
+            // ── Route: POST /api/schedule ────────────────────────────────────
+            if (path === '/api/schedule') {
+                const { messageContent, scheduledTime, recipientName } = body;
+                if (!messageContent || !scheduledTime) {
+                    return jsonResponse({ error: 'Missing required fields: messageContent, scheduledTime' }, 400);
+                }
 
-    if (!messageContent || !scheduledTime) {
-        return new Response(JSON.stringify({ error: "Missing required fields" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
+                const scheduleDate = new Date(scheduledTime);
+                if (isNaN(scheduleDate.getTime())) {
+                    return jsonResponse({ error: 'Invalid scheduled time format' }, 400);
+                }
 
-    // Return success - actual scheduling is handled by Firestore
-    return new Response(JSON.stringify({
-        success: true,
-        scheduledMessage: {
-            content: messageContent,
-            scheduledFor: scheduledTime,
-            recipient: recipientName || "Unknown",
-            status: "pending"
-        },
-        message: `Message scheduled for ${new Date(scheduledTime).toLocaleString()}`
-    }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+                return jsonResponse({
+                    success: true,
+                    scheduledMessage: {
+                        content: messageContent,
+                        scheduledFor: scheduleDate.toISOString(),
+                        recipient: recipientName || 'Unknown',
+                        status: 'scheduled',
+                    },
+                    message: `Message scheduled for ${scheduleDate.toLocaleString()}`,
+                });
+            }
 
-// Generic handler for backward compatibility
-async function handleGeneric(request, apiKey, model, corsHeaders) {
-    const body = await request.json();
-    const userMessage = body.prompt || body.text;
-    const systemInstruction = body.systemInstruction || "You are a helpful AI assistant.";
+            // ── Default Route: POST / or /api/generate or /api/chat ──────────
+            const prompt = body.prompt || body.query || body.userPrompt || body.text || '';
+            const systemPrompt = body.systemPrompt || body.systemInstruction || '';
 
-    if (!userMessage) {
-        return new Response(JSON.stringify({ error: "No prompt provided" }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
+            if (!prompt.trim()) {
+                return jsonResponse({ error: 'Prompt or query is required.' }, 400);
+            }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const { text, modelUsed, latencyMs } = await callWithModelList(
+                apiKey,
+                FALLBACK_MODELS,
+                prompt,
+                systemPrompt
+            );
 
-    const payload = {
-        contents: [{ parts: [{ text: userMessage }] }],
-        systemInstruction: { parts: [{ text: systemInstruction }] }
-    };
+            console.log(`[generate] path=${path} model=${modelUsed} latency=${latencyMs}ms`);
 
-    const geminiResponse = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
+            return jsonResponse({
+                success: true,
+                text,
+                response: text,
+                modelUsed,
+                latencyMs,
+            });
 
-    const data = await geminiResponse.json();
-
-    if (data.error) {
-        return new Response(JSON.stringify({ error: data.error.message }), {
-            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-    }
-
-    return new Response(JSON.stringify(data), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
-}
+        } catch (err) {
+            const msg = err?.message || String(err);
+            console.error('Worker error:', msg);
+            return jsonResponse({ error: `AI Service Error: ${msg}` }, 500);
+        }
+    },
+};

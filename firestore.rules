@@ -12,64 +12,79 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    // Users collection
+    // ── 1. Users collection ──────────────────────────────────────
     match /users/{userId} {
-      // Anyone can read user profiles (for search, chat display)
+      // Anyone logged in can read user profiles (for search, chat display)
       allow read: if isAuthenticated();
       
       // Users can only create/update their own profile
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
+      allow create, update: if isOwner(userId);
       
-      // Users cannot delete profiles
+      // Profiles cannot be deleted
       allow delete: if false;
     }
     
-    // Chats collection
+    // ── 2. Chats collection ──────────────────────────────────────
     match /chats/{chatId} {
       // Only participants can read the chat
       allow read: if isAuthenticated() && 
         request.auth.uid in resource.data.participants;
       
-      // Any authenticated user can create a chat (they become a participant)
+      // Authenticated user can create a chat if they include themselves as participant
       allow create: if isAuthenticated() && 
         request.auth.uid in request.resource.data.participants;
       
-      // Only participants can update the chat
+      // Only existing participants can update chat details (lastMessage, unreadCount, typing, etc.)
       allow update: if isAuthenticated() && 
         request.auth.uid in resource.data.participants;
       
-      // Only group admins can delete groups (or last participant leaving)
+      // Only participants can delete 1-on-1 chat, and only admins can delete group
       allow delete: if isAuthenticated() && 
-        (resource.data.isGroup == false || 
-         request.auth.uid in resource.data.admins);
+        (
+          (resource.data.isGroup == false && request.auth.uid in resource.data.participants) ||
+          (resource.data.isGroup == true && request.auth.uid in resource.data.admins)
+        );
       
-      // Messages subcollection
+      // ── 3. Messages subcollection ──────────────────────────────
       match /messages/{messageId} {
         // Only chat participants can read messages
         allow read: if isAuthenticated() && 
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
         
-        // Only chat participants can send messages
+        // Only chat participants can send messages (and senderId must match auth.uid)
         allow create: if isAuthenticated() && 
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants &&
           request.resource.data.senderId == request.auth.uid;
         
-        // Only message sender or chat participants can update (for read status)
+        // Participants can update messages (for read/delivered status updates & soft delete)
         allow update: if isAuthenticated() && 
           request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
         
-        // Messages cannot be deleted
+        // Hard deletion of messages is prevented (app uses soft delete)
         allow delete: if false;
       }
     }
     
-    // Scheduled messages collection (for AI feature)
+    // ── 4. Scheduled messages collection ─────────────────────────
     match /scheduledMessages/{messageId} {
-      allow read, write: if isAuthenticated() && 
-        request.auth.uid == resource.data.senderId;
+      // User can only create scheduled message for themselves
       allow create: if isAuthenticated() && 
         request.resource.data.senderId == request.auth.uid;
+
+      // User can only read, update, or delete their own scheduled messages
+      allow read, update, delete: if isAuthenticated() && 
+        resource.data.senderId == request.auth.uid;
+    }
+
+    // ── 5. Reminders collection ──────────────────────────────────
+    match /reminders/{reminderId} {
+      // User can create reminder for themselves
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+
+      // User can read, update, or delete their own reminders
+      allow read, update, delete: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
     }
   }
 }

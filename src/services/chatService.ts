@@ -264,19 +264,21 @@ export async function markMessagesAsRead(
     currentUserId: string
 ): Promise<void> {
     const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
+    // Query by status only to avoid requiring composite indexes with inequality filter
     const q = query(
         messagesRef,
-        where('senderId', '!=', currentUserId),
         where('status', 'in', ['sent', 'delivered'])
     );
 
     try {
         const querySnapshot = await getDocs(q);
-        const updatePromises = querySnapshot.docs.map((msgDoc) =>
-            updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
-                status: 'read'
-            })
-        );
+        const updatePromises = querySnapshot.docs
+            .filter((msgDoc) => msgDoc.data().senderId !== currentUserId)
+            .map((msgDoc) =>
+                updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
+                    status: 'read'
+                })
+            );
         await Promise.all(updatePromises);
 
         // Get the last message ID to track read position
@@ -314,19 +316,21 @@ export async function markMessagesAsDelivered(
     currentUserId: string
 ): Promise<void> {
     const messagesRef = collection(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION);
+    // Query by status only to avoid requiring composite indexes with inequality filter
     const q = query(
         messagesRef,
-        where('senderId', '!=', currentUserId),
         where('status', '==', 'sent')
     );
 
     try {
         const querySnapshot = await getDocs(q);
-        const updatePromises = querySnapshot.docs.map((msgDoc) =>
-            updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
-                status: 'delivered'
-            })
-        );
+        const updatePromises = querySnapshot.docs
+            .filter((msgDoc) => msgDoc.data().senderId !== currentUserId)
+            .map((msgDoc) =>
+                updateDoc(doc(db, CHATS_COLLECTION, chatId, MESSAGES_COLLECTION, msgDoc.id), {
+                    status: 'delivered'
+                })
+            );
         await Promise.all(updatePromises);
     } catch (error) {
         // Silently fail - this is a non-critical operation
