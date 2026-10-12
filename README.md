@@ -227,9 +227,9 @@ This project was proudly built as a team submission for the **Vibe Hackathon** ð
 
 | Contributor | GitHub Profile |
 |:---|:---|
-| **Naseem** | [@Naseem2917](https://github.com/Naseem2917/) |
+| **Naseem Khan** | [@Naseem2917](https://github.com/Naseem2917/) |
 | **Ankit Shrivastava** | [@shrivastavaankit-2006](https://github.com/shrivastavaankit-2006/) |
-| **Shani** | [@shani0136](https://github.com/shani0136/) |
+| **Shani Sharma** | [@shani0136](https://github.com/shani0136/) |
 
 ---
 
