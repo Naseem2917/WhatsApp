@@ -1,6 +1,6 @@
 # 💬 WhatsApp Clone - Full Featured Chat Application
 
-A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, and AI-powered features.
+A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, and AI-powered features for the **Vibe Hackathon**.
 
 🌐 **Live Demo**: [https://whatsapp-hackthon.web.app/](https://whatsapp-hackthon.web.app/)
 
@@ -133,8 +133,8 @@ A modern, feature-rich WhatsApp clone built with React, TypeScript, Firebase, an
 
 ```bash
 # Clone the repository
-git clone https://github.com/naseem-2917/WhatsApp/
-cd whatsapp
+git clone https://github.com/Naseem2917/WhatsApp.git
+cd WhatsApp
 
 # Install dependencies
 npm install
@@ -221,8 +221,18 @@ This project is licensed under the MIT License.
 
 ---
 
-## 👨‍💻 Developer
+## 👥 Team & Contributors (Vibe Hackathon)
 
-Built with ❤️ for learning and demonstration purposes.
+This project was proudly built as a team submission for the **Vibe Hackathon** 🚀:
+
+| Contributor | GitHub Profile |
+|:---|:---|
+| **Naseem** | [@Naseem2917](https://github.com/Naseem2917/) |
+| **Ankit Shrivastava** | [@shrivastavaankit-2006](https://github.com/shrivastavaankit-2006/) |
+| **Shani** | [@shani0136](https://github.com/shani0136/) |
+
+---
+
+Built with ❤️ by our team for **Vibe Hackathon**.
 
 **Live Demo**: [https://whatsapp-hackthon.web.app/](https://whatsapp-hackthon.web.app/)
