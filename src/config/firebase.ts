@@ -5,12 +5,12 @@ import { getStorage } from 'firebase/storage';
 
 // Firebase configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyD2-efaF0hfp9e6CbHQgjBMAwwZWIVsCMc",
-    authDomain: "whatsapp-hackthon.firebaseapp.com",
-    projectId: "whatsapp-hackthon",
-    storageBucket: "whatsapp-hackthon.firebasestorage.app",
-    messagingSenderId: "1002407301458",
-    appId: "1:1002407301458:web:70f02d71c3c2e12d722a8b"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
