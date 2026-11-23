@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://whatsapp-hackthon.web.app/sitemap.xml
